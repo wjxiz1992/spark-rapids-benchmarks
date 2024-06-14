@@ -152,7 +152,8 @@ Parquet, Orc, Avro, JSON and Iceberg are supported for output data format at pre
 only Parquet and Orc are supported.
 
 Note: when exporting data from CSV to Iceberg, user needs to set necessary configs for Iceberg in submit template.
-e.g. [convert_submit_cpu_iceberg.template](./convert_submit_cpu_iceberg.template)
+e.g. [convert_submit_cpu_iceberg.template](./convert_submit_cpu_iceberg.template).
+To run iceberg against different Spark versions, please modify the Iceberg package version accordingly in the template file.
 
 User can also specify `--tables` to convert specific table or tables. See argument details below.
 
@@ -405,7 +406,8 @@ update operations cannot be done atomically on raw Parquet/Orc files, so we use
 [Iceberg](https://iceberg.apache.org/) as dataset metadata manager to overcome the issue.
 
 Enabling Iceberg requires additional configuration. Please refer to [Iceberg Spark](https://iceberg.apache.org/docs/latest/getting-started/)
-for details. We also provide a Spark submit template with necessary Iceberg configs: [maintenance_iceberg.template](./maintenance_iceberg.template)
+for details. We also provide a Spark submit template with necessary Iceberg configs: [maintenance_iceberg.template](./maintenance_iceberg.template).
+To run iceberg against different Spark versions, please modify the Iceberg package version accordingly in the template file.
 
 The data maintenance queries are in [data_maintenance](./data_maintenance) folder. `DF_*.sql` are
 DELETE queries while `LF_*.sql` are INSERT queries.
