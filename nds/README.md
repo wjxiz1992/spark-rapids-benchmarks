@@ -176,7 +176,7 @@ For [unmanaged tables](https://docs.databricks.com/lakehouse/data-objects.html#w
 user doesn't need to create the Metastore service,  appending `--delta_unmanaged` to arguments will be enough.
 
 NOTE: To enabling Delta against different Spark versions, please modify the Delta package version accordingly in the template file.
-For more version compatibility information, please visit [compatibility with apache spark](https://docs.delta.io/latest/releases.html#compatibility-with-apache-spark)
+For more version compatibility information, please visit [compatibility with apache spark](https://docs.delta.io/latest/releases.html#compatibility-with-apache-spark).
 
 Arguments for `nds_transcode.py`:
 
