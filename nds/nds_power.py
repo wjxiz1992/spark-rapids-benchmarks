@@ -32,11 +32,14 @@
 
 import argparse
 import csv
+import hashlib
 import os
+import posixpath
 import re
 import sys
 import time
 from collections import OrderedDict
+from urllib.parse import urlsplit, urlunsplit
 from pyspark.sql import SparkSession
 from PysparkBenchReport import PysparkBenchReport
 from pyspark.sql import DataFrame
@@ -69,6 +72,30 @@ def _quote_identifier(identifier):
 
 def _quote_sql_string(value):
     return "'{}'".format(value.replace("'", "''"))
+
+
+def _normalize_delta_location(location):
+    parsed = urlsplit(location.strip())
+    normalized_path = "/" + posixpath.normpath(parsed.path).lstrip("/")
+    if parsed.scheme:
+        return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(),
+                           normalized_path, "", ""))
+    return normalized_path
+
+
+def _delta_database_name(input_prefix):
+    normalized_prefix = _normalize_delta_location(input_prefix)
+    path_hash = hashlib.sha256(normalized_prefix.encode("utf-8")).hexdigest()[:16]
+    return "nds_delta_{}".format(path_hash)
+
+
+def _get_table_location(spark_session, table_identifier):
+    details = spark_session.sql(
+        "DESCRIBE TABLE EXTENDED {}".format(table_identifier)).collect()
+    for detail in details:
+        if detail["col_name"].strip() == "Location":
+            return _normalize_delta_location(detail["data_type"])
+    raise RuntimeError("Table location not found for {}".format(table_identifier))
 
 
 def _schema_to_ddl(schema):
@@ -291,13 +318,32 @@ def setup_tables(spark_session, input_prefix, input_format, use_decimal, executi
 
 def register_delta_tables(spark_session, input_prefix, execution_time_list):
     spark_app_id = _get_app_id(spark_session)
-    # Data maintenance needs persistent Delta tables as DELETE and INSERT targets.
+    database_name = _delta_database_name(input_prefix)
+    database_identifier = _quote_identifier(database_name)
+    create_database_sql = "CREATE DATABASE IF NOT EXISTS {}".format(database_identifier)
+    print(create_database_sql)
+    spark_session.sql(create_database_sql)
+    spark_session.catalog.setCurrentDatabase(database_name)
+
+    # Data maintenance needs persistent Delta tables as DELETE and INSERT targets. Isolate
+    # them by warehouse and verify their locations so an existing catalog entry cannot redirect
+    # maintenance writes to a different warehouse.
     for table_name in get_schemas(False).keys():
         start = int(time.time() * 1000)
         # input_prefix must be absolute path: https://github.com/delta-io/delta/issues/555
-        register_sql = f"CREATE TABLE IF NOT EXISTS {table_name} USING DELTA LOCATION '{input_prefix}/{table_name}'"
+        table_path = "{}/{}".format(input_prefix.rstrip("/"), table_name)
+        expected_location = _normalize_delta_location(table_path)
+        table_identifier = "{}.{}".format(database_identifier, _quote_identifier(table_name))
+        register_sql = "CREATE TABLE IF NOT EXISTS {} USING DELTA LOCATION {}".format(
+            table_identifier, _quote_sql_string(table_path))
         print(register_sql)
+        spark_session.catalog.dropTempView(table_name)
         spark_session.sql(register_sql)
+        registered_location = _get_table_location(spark_session, table_identifier)
+        if registered_location != expected_location:
+            raise RuntimeError(
+                "Delta table {} points to {}, expected {}. Refusing to run maintenance.".format(
+                    table_identifier, registered_location, expected_location))
         end = int(time.time() * 1000)
         print("====== Registering for table {} ======".format(table_name))
         print("Time taken: {} millis for table {}".format(end - start, table_name))
