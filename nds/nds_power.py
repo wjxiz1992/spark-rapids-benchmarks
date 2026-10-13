@@ -290,9 +290,20 @@ def setup_tables(spark_session, input_prefix, input_format, use_decimal, executi
     return execution_time_list
 
 def register_delta_tables(spark_session, input_prefix, execution_time_list):
-    # Keep unmanaged inputs session-scoped so concurrent benchmarks and scale factors cannot
-    # reuse a persistent table with the same name but a different location.
-    return setup_tables(spark_session, input_prefix, 'delta', False, execution_time_list)
+    spark_app_id = _get_app_id(spark_session)
+    # Data maintenance needs persistent Delta tables as DELETE and INSERT targets.
+    for table_name in get_schemas(False).keys():
+        start = int(time.time() * 1000)
+        # input_prefix must be absolute path: https://github.com/delta-io/delta/issues/555
+        register_sql = f"CREATE TABLE IF NOT EXISTS {table_name} USING DELTA LOCATION '{input_prefix}/{table_name}'"
+        print(register_sql)
+        spark_session.sql(register_sql)
+        end = int(time.time() * 1000)
+        print("====== Registering for table {} ======".format(table_name))
+        print("Time taken: {} millis for table {}".format(end - start, table_name))
+        execution_time_list.append(
+            (spark_app_id, "Register {}".format(table_name), end - start))
+    return execution_time_list
 
 
 def parse_explain_str(explain_str):
@@ -469,8 +480,10 @@ def run_query_stream(input_prefix,
         spark_session.catalog.setCurrentDatabase(input_prefix)
 
     if input_format == 'delta' and delta_unmanaged:
-        # Register tables for Delta Lake. This is only needed for unmanaged tables.
-        execution_time_list = register_delta_tables(spark_session, input_prefix, execution_time_list)
+        # Power queries are read-only, so keep unmanaged inputs session-scoped. Data maintenance
+        # still uses register_delta_tables because its DELETE and INSERT targets must be tables.
+        execution_time_list = setup_tables(spark_session, input_prefix, 'delta', use_decimal,
+                                           execution_time_list)
     spark_app_id = _get_app_id(spark_session)
     if input_format != 'iceberg' and input_format != 'delta' and not hive_external:
         execution_time_list = setup_tables(spark_session, input_prefix, input_format, use_decimal,
