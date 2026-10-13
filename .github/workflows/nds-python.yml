@@ -33,6 +33,4 @@ jobs:
       - name: Compile
         run: python -m py_compile nds/nds_bench.py nds/test_nds_bench.py
       - name: Unit tests
-        run: >-
-          PYTHONPATH=nds python -m unittest discover
-          -s nds -p "test_nds_bench.py" -v
+        run: PYTHONPATH=nds python -m unittest -v nds/test_nds_bench.py
