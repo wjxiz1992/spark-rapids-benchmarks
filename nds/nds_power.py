@@ -89,6 +89,13 @@ def _delta_database_name(input_prefix):
     return "nds_delta_{}".format(path_hash)
 
 
+def _qualify_delta_location(spark_session, location):
+    hadoop_path = spark_session._jvm.org.apache.hadoop.fs.Path(location)
+    hadoop_conf = spark_session.sparkContext._jsc.hadoopConfiguration()
+    qualified_path = hadoop_path.getFileSystem(hadoop_conf).makeQualified(hadoop_path)
+    return _normalize_delta_location(qualified_path.toUri().toString())
+
+
 def _get_table_location(spark_session, table_identifier):
     details = spark_session.sql(
         "DESCRIBE TABLE EXTENDED {}".format(table_identifier)).collect()
@@ -318,7 +325,8 @@ def setup_tables(spark_session, input_prefix, input_format, use_decimal, executi
 
 def register_delta_tables(spark_session, input_prefix, execution_time_list):
     spark_app_id = _get_app_id(spark_session)
-    database_name = _delta_database_name(input_prefix)
+    qualified_prefix = _qualify_delta_location(spark_session, input_prefix)
+    database_name = _delta_database_name(qualified_prefix)
     database_identifier = _quote_identifier(database_name)
     create_database_sql = "CREATE DATABASE IF NOT EXISTS {}".format(database_identifier)
     print(create_database_sql)
@@ -332,7 +340,7 @@ def register_delta_tables(spark_session, input_prefix, execution_time_list):
         start = int(time.time() * 1000)
         # input_prefix must be absolute path: https://github.com/delta-io/delta/issues/555
         table_path = "{}/{}".format(input_prefix.rstrip("/"), table_name)
-        expected_location = _normalize_delta_location(table_path)
+        expected_location = "{}/{}".format(qualified_prefix.rstrip("/"), table_name)
         table_identifier = "{}.{}".format(database_identifier, _quote_identifier(table_name))
         register_sql = "CREATE TABLE IF NOT EXISTS {} USING DELTA LOCATION {}".format(
             table_identifier, _quote_sql_string(table_path))

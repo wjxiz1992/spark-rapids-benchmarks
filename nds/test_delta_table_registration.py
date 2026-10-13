@@ -79,15 +79,16 @@ class DeltaTableRegistrationTest(unittest.TestCase):
             nds_power._delta_database_name(first),
             nds_power._delta_database_name(different))
 
+    @patch("nds_power._qualify_delta_location", return_value="file:///tmp/delta_sf3k")
     @patch("nds_power.get_schemas", return_value={"customer": None})
-    def test_registers_in_warehouse_database_and_checks_location(self, _):
-        warehouse = "abfss://nds@account.dfs.core.windows.net/delta_sf3k/"
+    def test_registers_in_warehouse_database_and_checks_location(self, _, __):
+        warehouse = "/tmp/delta_sf3k/"
         table_path = warehouse.rstrip("/") + "/customer"
-        spark = _SparkSession(table_path)
+        spark = _SparkSession("file:///tmp/delta_sf3k/customer")
 
         timings = nds_power.register_delta_tables(spark, warehouse, [])
 
-        database = nds_power._delta_database_name(warehouse)
+        database = nds_power._delta_database_name("file:///tmp/delta_sf3k")
         self.assertEqual(database, spark.catalog.current_database)
         self.assertEqual(["customer"], spark.catalog.dropped_temp_views)
         self.assertEqual(
@@ -102,8 +103,10 @@ class DeltaTableRegistrationTest(unittest.TestCase):
             spark.statements[2])
         self.assertEqual("Register customer", timings[0][1])
 
+    @patch("nds_power._qualify_delta_location",
+           return_value="abfss://nds@account.dfs.core.windows.net/delta_sf3k")
     @patch("nds_power.get_schemas", return_value={"customer": None})
-    def test_rejects_existing_table_at_another_location(self, _):
+    def test_rejects_existing_table_at_another_location(self, _, __):
         warehouse = "abfss://nds@account.dfs.core.windows.net/delta_sf3k"
         spark = _SparkSession(
             "abfss://nds@account.dfs.core.windows.net/delta_sf1/customer")
