@@ -42,6 +42,7 @@ import subprocess
 
 from setup_utils import add_utils_to_sys_path
 add_utils_to_sys_path()
+from delta_clone import DeltaCloneScope
 from spark_utils import setQueryName, clearQueryName
 from profiler import Profiler
 
@@ -170,9 +171,22 @@ def setup_tables(spark_session, input_prefix, input_format, execution_time_list,
 
 
 def register_delta_tables(spark_session, input_prefix, execution_time_list):
-    # Keep unmanaged inputs session-scoped so concurrent benchmarks and scale factors cannot
-    # reuse a persistent table with the same name but a different location.
-    return setup_tables(spark_session, input_prefix, 'delta', execution_time_list)
+    spark_app_id = _get_app_id(spark_session)
+    clone_scope = DeltaCloneScope(spark_session, "nds_h_delta_run")
+    try:
+        for table_name in get_schemas().keys():
+            start = int(time.time() * 1000)
+            source_path = "{}/{}".format(input_prefix.rstrip("/"), table_name)
+            clone_scope.clone_table(source_path, table_name)
+            end = int(time.time() * 1000)
+            print("====== Shallow cloning table {} ======".format(table_name))
+            print("Time taken: {} millis for table {}".format(end - start, table_name))
+            execution_time_list.append(
+                (spark_app_id, "ShallowClone {}".format(table_name), end - start))
+    except Exception:
+        clone_scope.close()
+        raise
+    return execution_time_list, clone_scope
 
 
 def ensure_valid_column_names(df: DataFrame):
@@ -281,7 +295,7 @@ def run_query_stream(input_prefix,
                      analyze_tables=False,
                      allow_failure=False):
     """run SQL in Spark and record execution time log. The execution time log is saved as a CSV file
-    for easy accessibility. TempView Creation time is also recorded.
+    for easy accessibility. Table setup time is also recorded.
 
     Args:
         :param input_prefix : path of input data or warehouse if input_format is "iceberg" or hive_external=True.
@@ -316,56 +330,64 @@ def run_query_stream(input_prefix,
     spark_session = session_builder.appName(
         app_name).getOrCreate()
     spark_app_id = _get_app_id(spark_session)
-    if input_format != 'iceberg' and input_format != 'delta':
-        execution_time_list = setup_tables(spark_session, input_prefix, input_format,
-                                           execution_time_list,
-                                           analyze_tables)
-    elif input_format == 'delta':
-        execution_time_list = register_delta_tables(spark_session, input_prefix,
-                                                     execution_time_list)
+    delta_clone_scope = None
+    try:
+        if input_format != 'iceberg' and input_format != 'delta':
+            execution_time_list = setup_tables(spark_session, input_prefix, input_format,
+                                               execution_time_list,
+                                               analyze_tables)
+        elif input_format == 'delta':
+            execution_time_list, delta_clone_scope = register_delta_tables(
+                spark_session, input_prefix, execution_time_list)
 
-    check_json_summary_folder(json_summary_folder)
-    if sub_queries:
-        query_dict = get_query_subset(query_dict, sub_queries)
+        check_json_summary_folder(json_summary_folder)
+        if sub_queries:
+            query_dict = get_query_subset(query_dict, sub_queries)
 
-    # Setup profiler
-    profiler = Profiler(profiling_hook=profiling_hook, output_root=json_summary_folder)
+        # Setup profiler
+        profiler = Profiler(profiling_hook=profiling_hook, output_root=json_summary_folder)
 
-    power_start = int(time.time())
-    for query_name, q_content in query_dict.items():
-        # show query name in Spark web UI
-        setQueryName(spark_session, query_name)
-        print("====== Run {} ======".format(query_name))
-        q_report = PysparkBenchReport(spark_session, query_name)
-        with profiler(query_name=query_name):
-            summary = q_report.report_on(run_one_query,
-                                     warmup_iterations,
-                                     iterations,
-                                     spark_session,
-                                     q_content,
-                                     query_name,
-                                     output_path,
-                                     output_format,
-                                     save_plan_path,
-                                     plan_types,
-                                     skip_execution)
-        print(f"Time taken: {summary['queryTimes']} millis for {query_name}")
-        query_times = summary['queryTimes']
-        execution_time_list.append((spark_app_id, query_name, query_times[0]))
-        queries_reports.append(q_report)
-        if json_summary_folder:
-            if property_file:
-                summary_prefix = os.path.join(
-                    json_summary_folder, os.path.basename(property_file)
-                )
-            else:
-                summary_prefix = os.path.join(json_summary_folder, '')
-            q_report.write_summary(prefix=summary_prefix)
-    clearQueryName(spark_session)
-    power_end = int(time.time())
-    power_elapse = int((power_end - power_start)*1000)
-    if not keep_sc:
-        spark_session.stop()
+        power_start = int(time.time())
+        for query_name, q_content in query_dict.items():
+            # show query name in Spark web UI
+            setQueryName(spark_session, query_name)
+            print("====== Run {} ======".format(query_name))
+            q_report = PysparkBenchReport(spark_session, query_name)
+            with profiler(query_name=query_name):
+                summary = q_report.report_on(run_one_query,
+                                             warmup_iterations,
+                                             iterations,
+                                             spark_session,
+                                             q_content,
+                                             query_name,
+                                             output_path,
+                                             output_format,
+                                             save_plan_path,
+                                             plan_types,
+                                             skip_execution)
+            print(f"Time taken: {summary['queryTimes']} millis for {query_name}")
+            query_times = summary['queryTimes']
+            execution_time_list.append((spark_app_id, query_name, query_times[0]))
+            queries_reports.append(q_report)
+            if json_summary_folder:
+                if property_file:
+                    summary_prefix = os.path.join(
+                        json_summary_folder, os.path.basename(property_file)
+                    )
+                else:
+                    summary_prefix = os.path.join(json_summary_folder, '')
+                q_report.write_summary(prefix=summary_prefix)
+        clearQueryName(spark_session)
+        power_end = int(time.time())
+        power_elapse = int((power_end - power_start)*1000)
+    finally:
+        try:
+            if delta_clone_scope is not None:
+                delta_clone_scope.close()
+        finally:
+            if not keep_sc:
+                spark_session.stop()
+
     total_time_end = time.time()
     total_elapse = int((total_time_end - total_time_start) * 1000)
     print("====== Power Test Time: {} milliseconds ======".format(power_elapse))
@@ -435,6 +457,7 @@ if __name__ == "__main__":
                         default="")
     parser.add_argument('--input_format',
                         help='type for input data source, e.g. parquet, orc, json, csv or iceberg, delta. ' +
+                             'Delta paths are read through run-scoped managed shallow clones. ' +
                              'Certain types are not fully supported by GPU reading, please refer to ' +
                              'https://github.com/NVIDIA/cudf-spark/blob/main/docs/compatibility.md ' +
                              'for more details.',

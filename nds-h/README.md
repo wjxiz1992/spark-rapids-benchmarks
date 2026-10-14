@@ -210,6 +210,11 @@ With `--analyze_tables`, discovered file partitions are registered before
 collecting statistics, including NULL partitions. Partitioned and unpartitioned
 file-backed tables expose their input rows through the catalog.
 
+For Delta input, each run creates a unique database of catalog-managed shallow
+clones. Queries use those persistent table objects, while the source Delta tables
+remain unchanged. The database and all clones are dropped when the run finishes
+or fails. The Spark catalog and its managed table storage must be writable.
+
 Arguments supported by `nds_h_power.py`:
 
 ```text
@@ -231,7 +236,7 @@ optional arguments:
   -h, --help            show this help message and exit
   --input_format {parquet,orc,avro,csv,json,iceberg,delta}
                         type for input data source, e.g. parquet, orc, json, csv or iceberg,
-  delta. Certain types are not fully supported by GPU reading, please refer to
+  delta. Delta paths are read through run-scoped managed shallow clones. Certain types are not fully supported by GPU reading, please refer to
   https://github.com/NVIDIA/cudf-spark/blob/main/docs/compatibility.md for more details.
   --output_prefix OUTPUT_PREFIX
                         text to prepend to every output file (e.g., "hdfs:///ds-parquet")
