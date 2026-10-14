@@ -21,6 +21,21 @@ spec.loader.exec_module(nds_h_power)
 
 
 class DeltaCloneRegistrationTest(unittest.TestCase):
+    def test_bundled_delta_templates_use_clone_capable_release(self):
+        coordinate = 'io.delta:delta-core_2.12:2.3.0'
+        template_names = (
+            'convert_submit_cpu_delta.template',
+            'maintenance_delta.template',
+            'power_run_cpu_delta.template',
+            'power_run_gpu_delta.template',
+        )
+
+        for template_name in template_names:
+            with self.subTest(template=template_name):
+                template = (ROOT / 'nds' / template_name).read_text()
+                self.assertIn(coordinate, template)
+                self.assertNotIn('io.delta:delta-core_2.12:2.1.1', template)
+
     def test_nds_registers_every_delta_path_in_one_clone_scope(self):
         spark = Mock()
         spark.conf.get.return_value = 'application-nds'

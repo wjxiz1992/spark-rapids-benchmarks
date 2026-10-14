@@ -323,6 +323,10 @@ objects, while the source Delta tables remain unchanged. The database and all
 clones are dropped when the run finishes or fails. The Spark catalog and its
 managed table storage must be writable.
 
+Shallow clones require Delta Lake 2.3 or later. The bundled Spark 3.3 Delta
+templates use `io.delta:delta-core_2.12:2.3.0`; choose the corresponding Delta
+release when running another Spark version.
+
 Arguments supported by `nds_power.py`:
 
 ```text
