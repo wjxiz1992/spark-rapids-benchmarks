@@ -3,6 +3,7 @@
 """Check run-scoped Delta clone registration in both power drivers."""
 
 import importlib.util
+from datetime import datetime
 from pathlib import Path
 import sys
 import tempfile
@@ -138,6 +139,62 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
         self.assertIs(stopped.exception, error)
         scope.close.assert_called_once_with()
         spark.sparkContext.stop.assert_called_once_with()
+
+    def test_maintenance_time_excludes_clone_setup_and_cleanup(self):
+        spark = Mock()
+        spark.sparkContext.applicationId = 'application-maintenance'
+        scope = Mock()
+        report = Mock()
+        report.report_on.return_value = {'queryTimes': 250}
+        clock = Mock()
+        events = []
+        timestamps = iter([
+            datetime(2026, 10, 15, 0, 0, 0),
+            datetime(2026, 10, 15, 0, 0, 10),
+            datetime(2026, 10, 15, 0, 0, 20),
+            datetime(2026, 10, 15, 0, 0, 30),
+        ])
+
+        def now():
+            timestamp = next(timestamps)
+            events.append('time-{}'.format(timestamp.second))
+            return timestamp
+
+        def register_delta_tables(*_):
+            events.append('clone-setup')
+            return [], scope
+
+        clock.now.side_effect = now
+        scope.close.side_effect = lambda: events.append('clone-cleanup')
+        report.report_on.side_effect = lambda *_: (
+            events.append('dml') or {'queryTimes': 250})
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(nds_maintenance, 'datetime', clock), \
+                patch.object(nds_maintenance, 'register_delta_tables',
+                             side_effect=register_delta_tables), \
+                patch.object(nds_maintenance, 'PysparkBenchReport', return_value=report), \
+                patch.object(nds_maintenance, 'setQueryName'), \
+                patch.object(nds_maintenance, 'clearQueryName'):
+            report_path = Path(directory) / 'times.csv'
+            nds_maintenance.run_query(
+                spark, {'DF_CS': ['DELETE FROM catalog_sales']},
+                str(report_path), None, None,
+                '/reference', 'delta', True, delta_unmanaged=True)
+
+            rows = report_path.read_text().splitlines()
+
+        self.assertEqual(events, [
+            'time-0',
+            'clone-setup',
+            'time-10',
+            'dml',
+            'time-20',
+            'clone-cleanup',
+            'time-30',
+        ])
+        self.assertIn('application-maintenance,Data Maintenance Time,10.0', rows)
+        self.assertIn('application-maintenance,Total Time,30.0', rows)
 
 
 if __name__ == '__main__':

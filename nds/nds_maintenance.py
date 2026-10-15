@@ -224,12 +224,14 @@ def run_query(spark_session,
     # Run query
     total_time_start = datetime.now()
     spark_app_id = spark_session.sparkContext.applicationId
-    DM_start = datetime.now()
     delta_clone_scope = None
     try:
         if warehouse_type == 'delta' and delta_unmanaged:
             execution_time_list, delta_clone_scope = register_delta_tables(
                 spark_session, warehouse_path, execution_time_list)
+        # Clone creation is run isolation rather than refresh DML. Keep it out of the scored
+        # maintenance interval and account for the complete clone lifecycle in Total Time.
+        DM_start = datetime.now()
         for query_name, q_content in query_dict.items():
             # show query name in Spark web UI
             setQueryName(spark_session, query_name)
@@ -257,11 +259,12 @@ def run_query(spark_session,
             if delta_clone_scope is not None:
                 delta_clone_scope.close()
         finally:
+            total_time_end = datetime.now()
             if not keep_sc:
                 spark_session.sparkContext.stop()
 
     DM_elapse = (DM_end - DM_start).total_seconds()
-    total_elapse = (DM_end - total_time_start).total_seconds()
+    total_elapse = (total_time_end - total_time_start).total_seconds()
     print(f"====== Data Maintenance Start Time: {DM_start}")
     print(f"====== Data Maintenance Time: {DM_elapse} s ======")
     print(f"====== Total Time: {total_elapse} s ======")
