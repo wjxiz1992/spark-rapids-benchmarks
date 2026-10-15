@@ -9,11 +9,13 @@ import tempfile
 import unittest
 from unittest.mock import Mock, call, patch
 
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'nds'))
 import nds_maintenance
 import nds_power
 
 
-ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'nds-h'))
 spec = importlib.util.spec_from_file_location('nds_h_delta_power', ROOT / 'nds-h/nds_h_power.py')
 nds_h_power = importlib.util.module_from_spec(spec)

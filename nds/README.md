@@ -313,6 +313,31 @@ The listener implementation is binary compatible with both Scala 2.12 and Scala 
 
 _After_ user generates query streams, Power Run can be executed using one of them by submitting `nds_power.py` to Spark.
 
+`nds_power.py --cutoff_date 2001-07-01` loads fact partitions whose date keys
+map to dates on or before the cutoff in `date_dim`. NULL-date partitions are always
+included, regardless of the cutoff. Dimension tables are read in full. The facts must use the partition layout listed above;
+unknown date keys and unexpected layouts are rejected. Preparation time for reading
+`date_dim` and selecting fact partitions is recorded separately as
+`Power Cutoff Setup Time` in milliseconds. Each fact table must
+have at least one dated partition at or before the cutoff, even when it has a
+NULL-date partition.
+
+The driver cutoff only restricts data; it does not change query text or date
+literals. Direct callers must supply queries whose date windows fit the loaded
+range.
+
+Cutoff loading requires a classic Spark session on the driver, including
+distributed Spark, with file-backed inputs. It cannot be combined with Iceberg,
+Delta, external Hive tables or Spark Connect. Without `--cutoff_date`, loading
+is unchanged.
+
+Combine `--cutoff_date` with `--analyze_tables` to register only the selected
+fact partitions, including NULL partitions, before collecting table statistics.
+This requires fresh catalog tables and
+`spark.sql.hive.manageFilesourcePartitions=true`; existing catalog tables are
+rejected so previously registered partitions cannot bypass the cutoff.
+Without analysis, cutoff data is exposed through temporary views.
+
 With `--analyze_tables`, discovered file partitions are registered before
 collecting statistics, including NULL partitions. Partitioned and unpartitioned
 file-backed tables expose their input rows through the catalog.
@@ -330,7 +355,7 @@ release when running another Spark version.
 Arguments supported by `nds_power.py`:
 
 ```text
-usage: nds_power.py [-h] [--input_format {parquet,orc,avro,csv,json,iceberg,delta}] [--output_prefix OUTPUT_PREFIX] [--output_format OUTPUT_FORMAT] [--property_file PROPERTY_FILE] [--floats] [--json_summary_folder JSON_SUMMARY_FOLDER] [--delta_unmanaged] [--hive] [--app_name APP_NAME] input_prefix query_stream_file time_log
+usage: nds_power.py [-h] [--input_format {parquet,orc,avro,csv,json,iceberg,delta}] [--output_prefix OUTPUT_PREFIX] [--output_format OUTPUT_FORMAT] [--property_file PROPERTY_FILE] [--floats] [--json_summary_folder JSON_SUMMARY_FOLDER] [--delta_unmanaged] [--hive] [--app_name APP_NAME] [--cutoff_date CUTOFF_DATE] input_prefix query_stream_file time_log
 
 positional arguments:
   input_prefix          text to prepend to every input file path (e.g., "hdfs:///ds-generated-data"). If input_format is "iceberg", this argument will be regarded as the value of property "spark.sql.catalog.spark_catalog.warehouse". Only default Spark catalog session name
@@ -343,6 +368,9 @@ optional arguments:
   --input_format {parquet,orc,avro,csv,json,iceberg,delta}
                         type for input data source, e.g. parquet, orc, json, csv or iceberg, delta. Certain types are not fully supported by GPU reading, please refer to
   https://github.com/NVIDIA/cudf-spark/blob/main/docs/compatibility.md for more details.
+  --cutoff_date CUTOFF_DATE
+                        load dated fact partitions through YYYY-MM-DD, plus NULL-date partitions;
+                        the caller supplies queries whose dates fit the loaded range.
   --output_prefix OUTPUT_PREFIX
                         text to prepend to every output file (e.g., "hdfs:///ds-parquet")
   --output_format OUTPUT_FORMAT
