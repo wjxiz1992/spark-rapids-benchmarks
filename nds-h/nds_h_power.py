@@ -329,6 +329,10 @@ def run_query_stream(input_prefix,
             session_builder = session_builder.config(k, v)
     spark_session = session_builder.appName(
         app_name).getOrCreate()
+    if input_format == 'delta':
+        # Keep this run's current database and temporary-view namespace isolated
+        # from other work sharing the same SparkContext.
+        spark_session = spark_session.newSession()
     spark_app_id = _get_app_id(spark_session)
     delta_clone_scope = None
     try:

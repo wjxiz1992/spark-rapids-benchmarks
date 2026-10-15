@@ -25,7 +25,7 @@ class DeltaCloneScopeTest(unittest.TestCase):
             call('nds_delta_run_0123456789abcdef'),
             call('default'),
         ])
-        spark.catalog.dropTempView.assert_called_once_with('customer`copy')
+        spark.catalog.dropTempView.assert_not_called()
         self.assertEqual(spark.sql.call_args_list, [
             call('CREATE DATABASE `nds_delta_run_0123456789abcdef`'),
             call('CREATE TABLE `nds_delta_run_0123456789abcdef`.`customer``copy` '

@@ -10,7 +10,7 @@ def _quote_identifier(identifier):
 
 
 class DeltaCloneScope:
-    """Own a unique database of managed shallow clones for one benchmark run."""
+    """Own a unique database of managed shallow clones in a run-owned SQL session."""
 
     def __init__(self, spark_session, database_prefix):
         self._spark_session = spark_session
@@ -37,11 +37,10 @@ class DeltaCloneScope:
         clone_sql = "CREATE TABLE {} SHALLOW CLONE {}".format(
             table_identifier, source_identifier)
         print(clone_sql)
-        self._spark_session.catalog.dropTempView(table_name)
         self._spark_session.sql(clone_sql)
 
     def close(self):
-        """Restore the caller's database and delete all managed clone tables."""
+        """Restore the session's database and delete all managed clone tables."""
         if not self._is_open:
             return
         self._spark_session.catalog.setCurrentDatabase(self.previous_database)

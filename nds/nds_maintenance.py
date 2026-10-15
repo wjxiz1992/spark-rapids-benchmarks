@@ -109,7 +109,8 @@ def get_valid_query_names(spec_queries):
         DM_FUNCS = spec_queries
     return DM_FUNCS
 
-def create_spark_session(valid_queries, warehouse_path, warehouse_type):
+def create_spark_session(valid_queries, warehouse_path, warehouse_type,
+                         delta_unmanaged=False):
     if len(valid_queries) == 1:
         app_name = "NDS - Data Maintenance - " + valid_queries[0]
     else:
@@ -121,6 +122,10 @@ def create_spark_session(valid_queries, warehouse_path, warehouse_type):
     if warehouse_type == "iceberg":
         spark_session_builder.config("spark.sql.catalog.spark_catalog.warehouse", warehouse_path)
     spark_session = spark_session_builder.appName(app_name).getOrCreate()
+    if warehouse_type == 'delta' and delta_unmanaged:
+        # Register refresh-data views and clones in a run-owned namespace so the
+        # caller's current database and temporary views remain untouched.
+        spark_session = spark_session.newSession()
     return spark_session
 
 def get_maintenance_queries(spark_session, folder, valid_queries):
@@ -329,7 +334,8 @@ if __name__ == "__main__":
                         'tables are not modified.')
     args = parser.parse_args()
     valid_queries = get_valid_query_names(args.maintenance_queries)
-    spark_session = create_spark_session(valid_queries, args.warehouse_path, args.warehouse_type)
+    spark_session = create_spark_session(valid_queries, args.warehouse_path,
+                                         args.warehouse_type, args.delta_unmanaged)
     register_temp_views(spark_session, args.refresh_data_path)
     query_dict = get_maintenance_queries(spark_session,
                                          args.maintenance_queries_folder,

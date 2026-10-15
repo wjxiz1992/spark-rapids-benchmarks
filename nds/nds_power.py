@@ -600,6 +600,10 @@ def run_query_stream(input_prefix,
 
     spark_session = session_builder.appName(
         app_name).getOrCreate()
+    if input_format == 'delta' and delta_unmanaged:
+        # Keep this run's current database and temporary-view namespace isolated
+        # from other work sharing the same SparkContext.
+        spark_session = spark_session.newSession()
     if hive_external:
         spark_session.catalog.setCurrentDatabase(input_prefix)
 

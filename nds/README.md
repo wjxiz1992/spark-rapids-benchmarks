@@ -345,8 +345,10 @@ file-backed tables expose their input rows through the catalog.
 For path-based Delta input, `--delta_unmanaged` creates a unique database of
 catalog-managed shallow clones for each run. Queries use those persistent table
 objects, while the source Delta tables remain unchanged. The database and all
-clones are dropped when the run finishes or fails. The Spark catalog and its
-managed table storage must be writable.
+clones are dropped when the run finishes or fails. Each run uses a dedicated SQL
+session, so changing its current database does not affect another run and caller
+temporary views remain untouched. The Spark catalog and its managed table storage
+must be writable.
 
 Shallow clones require Delta Lake 2.3 or later. The bundled Spark 3.3 Delta
 templates use `io.delta:delta-core_2.12:2.3.0`; choose the corresponding Delta
@@ -538,7 +540,11 @@ DELETE queries while `LF_*.sql` are INSERT queries.
 
 With Delta and `--delta_unmanaged`, maintenance operations target the same
 run-scoped managed shallow clones used by the power runner. The immutable source
-tables are not modified, and the clone database is dropped after the run.
+tables are not modified. Maintenance changes are visible only within the current
+`nds_maintenance.py` invocation: the clone database is dropped after success or
+failure, and later benchmark phases or runs start again from the immutable
+reference data. The run also uses a dedicated SQL session, leaving the caller's
+current database and temporary views unchanged.
 
 Note: The Delete functions in Data Maintenance cannot run successfully in Spark 3.2.0 and 3.2.1 due
 to a known Spark [issue](https://issues.apache.org/jira/browse/SPARK-39454). User can run it in Spark 3.2.2

@@ -75,16 +75,19 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
         scope.close.assert_called_once_with()
 
     def test_nds_power_closes_clone_scope_on_failure_and_stops_session(self):
+        shared_spark = Mock()
         spark = Mock()
         spark.conf.get.return_value = 'application-nds'
+        shared_spark.newSession.return_value = spark
         builder = Mock()
-        builder.appName.return_value.getOrCreate.return_value = spark
+        builder.appName.return_value.getOrCreate.return_value = shared_spark
         scope = Mock()
         error = RuntimeError('query setup failed')
 
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(nds_power.SparkSession, 'builder', builder), \
-                patch.object(nds_power, 'register_delta_tables', return_value=([], scope)), \
+                patch.object(nds_power, 'register_delta_tables',
+                             return_value=([], scope)) as register_delta_tables, \
                 patch.object(nds_power, 'check_json_summary_folder', side_effect=error):
             with self.assertRaises(RuntimeError) as stopped:
                 nds_power.run_query_stream(
@@ -93,20 +96,25 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
                     delta_unmanaged=True)
 
         self.assertIs(stopped.exception, error)
+        shared_spark.newSession.assert_called_once_with()
+        register_delta_tables.assert_called_once_with(spark, '/reference', [])
         scope.close.assert_called_once_with()
         spark.stop.assert_called_once_with()
 
     def test_nds_h_power_closes_clone_scope_on_failure_and_stops_session(self):
+        shared_spark = Mock()
         spark = Mock()
         spark.conf.get.return_value = 'application-nds-h'
+        shared_spark.newSession.return_value = spark
         builder = Mock()
-        builder.appName.return_value.getOrCreate.return_value = spark
+        builder.appName.return_value.getOrCreate.return_value = shared_spark
         scope = Mock()
         error = RuntimeError('query setup failed')
 
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(nds_h_power.SparkSession, 'builder', builder), \
-                patch.object(nds_h_power, 'register_delta_tables', return_value=([], scope)), \
+                patch.object(nds_h_power, 'register_delta_tables',
+                             return_value=([], scope)) as register_delta_tables, \
                 patch.object(nds_h_power, 'check_json_summary_folder', side_effect=error):
             with self.assertRaises(RuntimeError) as stopped:
                 nds_h_power.run_query_stream(
@@ -114,8 +122,25 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
                     None, 0, 1, ['logical'], 'delta')
 
         self.assertIs(stopped.exception, error)
+        shared_spark.newSession.assert_called_once_with()
+        register_delta_tables.assert_called_once_with(spark, '/reference', [])
         scope.close.assert_called_once_with()
         spark.stop.assert_called_once_with()
+
+    def test_maintenance_uses_run_owned_session_for_unmanaged_delta(self):
+        shared_spark = Mock()
+        run_spark = Mock()
+        shared_spark.newSession.return_value = run_spark
+        builder = Mock()
+        builder.config.return_value = builder
+        builder.appName.return_value.getOrCreate.return_value = shared_spark
+
+        with patch.object(nds_maintenance.SparkSession, 'builder', builder):
+            returned = nds_maintenance.create_spark_session(
+                ['DF_CS'], '/reference', 'delta', delta_unmanaged=True)
+
+        shared_spark.newSession.assert_called_once_with()
+        self.assertIs(returned, run_spark)
 
     def test_maintenance_closes_clone_scope_on_query_failure_and_stops_context(self):
         spark = Mock()

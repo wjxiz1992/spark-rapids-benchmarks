@@ -213,7 +213,9 @@ file-backed tables expose their input rows through the catalog.
 For Delta input, each run creates a unique database of catalog-managed shallow
 clones. Queries use those persistent table objects, while the source Delta tables
 remain unchanged. The database and all clones are dropped when the run finishes
-or fails. The Spark catalog and its managed table storage must be writable.
+or fails. Each run uses a dedicated SQL session, so changing its current database
+does not affect another run and caller temporary views remain untouched. The Spark
+catalog and its managed table storage must be writable.
 Shallow clones require Delta Lake 2.3 or later; use the Delta release compatible
 with the selected Spark version.
 
