@@ -350,6 +350,10 @@ session, so changing its current database does not affect another run and caller
 temporary views remain untouched. The Spark catalog and its managed table storage
 must be writable.
 
+Runtime settings requested in `--property_file` are applied to the run's session.
+Startup-only settings must match the existing Spark application when reusing a
+session.
+
 Shallow clones require Delta Lake 2.3 or later. The bundled Spark 3.3 Delta
 templates use `io.delta:delta-core_2.12:2.3.0`; choose the corresponding Delta
 release when running another Spark version.

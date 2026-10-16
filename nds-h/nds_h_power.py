@@ -42,7 +42,7 @@ import subprocess
 
 from setup_utils import add_utils_to_sys_path
 add_utils_to_sys_path()
-from delta_clone import DeltaCloneScope
+from delta_clone import DeltaCloneScope, new_run_session
 from spark_utils import setQueryName, clearQueryName
 from profiler import Profiler
 
@@ -323,6 +323,7 @@ def run_query_stream(input_prefix,
     session_builder = SparkSession.builder
     if spark_connect:
         session_builder = session_builder.remote(spark_connect)
+    spark_properties = {}
     if property_file:
         spark_properties = load_properties(property_file)
         for k, v in spark_properties.items():
@@ -332,7 +333,7 @@ def run_query_stream(input_prefix,
     if input_format == 'delta':
         # Keep this run's current database and temporary-view namespace isolated
         # from other work sharing the same SparkContext.
-        spark_session = spark_session.newSession()
+        spark_session = new_run_session(spark_session, spark_properties)
     spark_app_id = _get_app_id(spark_session)
     delta_clone_scope = None
     try:

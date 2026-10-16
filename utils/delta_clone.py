@@ -5,6 +5,20 @@
 import uuid
 
 
+def new_run_session(spark_session, spark_properties):
+    """Isolate a clone run and preserve its explicitly requested configuration.
+
+    newSession does not inherit runtime overrides applied by getOrCreate to an
+    existing session. Reapply those overrides, including custom RAPIDS keys.
+    Leave matching startup/static settings alone; Spark rejects changing them.
+    """
+    run_session = spark_session.newSession()
+    for key, value in spark_properties.items():
+        if run_session.conf.get(key, None) != value:
+            run_session.conf.set(key, value)
+    return run_session
+
+
 def _quote_identifier(identifier):
     return "`{}`".format(identifier.replace("`", "``"))
 
