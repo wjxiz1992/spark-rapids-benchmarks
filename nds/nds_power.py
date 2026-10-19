@@ -50,6 +50,8 @@ add_utils_to_sys_path()
 from delta_clone import DeltaCloneScope, new_run_session
 from spark_utils import setQueryName, clearQueryName
 from profiler import Profiler
+from benchmark_statistics import (analyze_table, analyze_catalog, clear_statistics_summary,
+                                  require_fresh_catalog_tables)
 
 check_version()
 
@@ -335,7 +337,7 @@ def gen_sql_from_stream(query_stream_file_path):
     return extended_queries
 
 def setup_tables(spark_session, input_prefix, input_format, use_decimal, execution_time_list,
-                 analyze_tables=False, cutoff_date=None):
+                 analyze_tables=False, cutoff_date=None, analyze=None):
     """set up data tables in Spark before running the Power Run queries.
 
     Args:
@@ -346,10 +348,14 @@ def setup_tables(spark_session, input_prefix, input_format, use_decimal, executi
         execution_time_list ([(str, str, int)]): a list to record query and its execution time.
         analyze_tables (bool): whether to register catalog tables and compute table statistics.
         cutoff_date (date): include dated fact partitions through this date, plus NULL.
+        analyze (str): optional none, table, or all_columns statistics mode.
 
     Returns:
         execution_time_list: a list recording query execution time.
     """
+    statistics_requested = analyze_tables or analyze in ('table', 'all_columns')
+    if analyze in ('table', 'all_columns'):
+        require_fresh_catalog_tables(spark_session, get_schemas(False))
     spark_app_id = _get_app_id(spark_session)
     partitions = {}
     if cutoff_date is not None:
@@ -379,27 +385,25 @@ def setup_tables(spark_session, input_prefix, input_format, use_decimal, executi
             selected = partitions[table_name]
             selected_frame = reader.option('basePath', table_path).load(
                 [path for _, path in selected])
-            if analyze_tables:
+            if statistics_requested:
                 _create_data_source_table(
                     spark_session, table_name, table_path, input_format, selected_frame.schema,
                     selected, DATE_PARTITION_COLUMNS[table_name])
             else:
                 selected_frame.createOrReplaceTempView(table_name)
-        elif analyze_tables:
+        elif statistics_requested:
             _create_data_source_table(spark_session, table_name, table_path, input_format, schema)
         else:
             reader.load(table_path).createOrReplaceTempView(table_name)
         end = int(time.time() * 1000)
-        create_action = "Table" if analyze_tables else "TempView"
+        create_action = "Table" if statistics_requested else "TempView"
         print("====== Creating {} for table {} ======".format(create_action, table_name))
         print("Time taken: {} millis for table {}".format(end - start, table_name))
         execution_time_list.append(
             (spark_app_id, "Create{} {}".format(create_action, table_name), end - start))
         if analyze_tables:
             start = int(time.time() * 1000)
-            analyze_sql = "ANALYZE TABLE `{}` COMPUTE STATISTICS".format(table_name)
-            print(analyze_sql)
-            spark_session.sql(analyze_sql)
+            analyze_table(spark_session, 'table', table_name)
             end = int(time.time() * 1000)
             print("====== Analyzing table {} ======".format(table_name))
             print("Time taken: {} millis for table {}".format(end - start, table_name))
@@ -550,7 +554,7 @@ def run_query_stream(input_prefix,
                      skip_execution=False,
                      app_name=None,
                      spark_connect=None,
-                     analyze_tables=False, cutoff_date=None):
+                     analyze_tables=False, cutoff_date=None, analyze=None):
     """run SQL in Spark and record execution time log. The execution time log is saved as a CSV file
     for easy accessibility. Table setup time is also recorded.
 
@@ -567,6 +571,22 @@ def run_query_stream(input_prefix,
         to "parquet".
         analyze_tables (bool, optional): whether to compute table statistics after creating tables.
     """
+    if analyze_tables and analyze is not None:
+        raise ValueError('--analyze and --analyze_tables cannot be combined')
+    if analyze == 'none':
+        analyze = None
+    if analyze is not None:
+        if analyze not in ('table', 'all_columns'):
+            raise ValueError('analyze must be none, table, or all_columns')
+        if spark_connect:
+            raise ValueError('--analyze is not supported with Spark Connect')
+        if input_format in ('iceberg', 'delta'):
+            raise ValueError('--analyze is not supported for Iceberg or Delta inputs')
+        if hive_external:
+            raise ValueError('--analyze is not supported with external Hive tables')
+    if analyze_tables:
+        print('Warning: --analyze_tables is deprecated; use --analyze table for supported '
+              'file-backed inputs. Legacy behavior is unchanged.', file=sys.stderr)
     if cutoff_date is not None and (input_format in ('iceberg', 'delta') or
                                     hive_external or spark_connect):
         raise ValueError('--cutoff_date requires file-backed inputs '
@@ -617,9 +637,13 @@ def run_query_stream(input_prefix,
         if input_format != 'iceberg' and input_format != 'delta' and not hive_external:
             execution_time_list = setup_tables(
                 spark_session, input_prefix, input_format, use_decimal,
-                execution_time_list, analyze_tables, cutoff_date)
+                execution_time_list, analyze_tables, cutoff_date, analyze)
 
         check_json_summary_folder(json_summary_folder)
+        clear_statistics_summary(json_summary_folder)
+        if analyze is not None:
+            analyze_catalog(spark_session, analyze, get_schemas(False).keys(),
+                            json_summary_folder)
         if sub_queries:
             query_dict = get_query_subset(query_dict, sub_queries)
         if sub_query_patterns:
@@ -779,9 +803,12 @@ if __name__ == "__main__":
                         help='Restrict dated fact partitions through this ISO date, plus NULL. '
                              'Does not shift SQL dates; callers must supply queries whose dates fit '
                              'the loaded data.')
-    parser.add_argument('--analyze_tables',
-                        action='store_true',
-                        help='Run ANALYZE TABLE <table> COMPUTE STATISTICS after creating each table.')
+    analysis = parser.add_mutually_exclusive_group()
+    analysis.add_argument('--analyze', choices=['none', 'table', 'all_columns'],
+                          help='Compute input statistics and record their cost; none leaves loading unchanged.')
+    analysis.add_argument('--analyze_tables',
+                          action='store_true',
+                          help='Deprecated: use --analyze table for supported file-backed inputs.')
     parser.add_argument('--output_prefix',
                         help='text to prepend to every output file (e.g., "hdfs:///ds-parquet")')
     parser.add_argument('--output_format',
@@ -889,4 +916,5 @@ if __name__ == "__main__":
                      args.app_name,
                      args.spark_connect,
                      args.analyze_tables,
-                     args.cutoff_date)
+                     args.cutoff_date,
+                     args.analyze)

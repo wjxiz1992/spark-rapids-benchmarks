@@ -358,6 +358,31 @@ Shallow clones require Delta Lake 2.3 or later. The bundled Spark 3.3 Delta
 templates use `io.delta:delta-core_2.12:2.3.0`; choose the corresponding Delta
 release when running another Spark version.
 
+`--analyze none|table|all_columns` controls statistics collection before the
+queries. `none` is equivalent to omitting the option. `table` collects row counts
+and table size; `all_columns` also runs `COMPUTE STATISTICS FOR ALL COLUMNS`.
+The configured Spark session, catalog and input provider are retained.
+Statistics are stored in that catalog and may persist across runs. New active
+analysis requires fresh target table names; an existing table is rejected before
+loading so another dataset cannot be reused accidentally. Active
+analysis requires file-backed inputs and is not supported with Delta, Iceberg,
+Spark Connect or external Hive tables; unsupported combinations return an error.
+With `--cutoff_date`, analysis covers only the selected fact partitions,
+including NULL partitions; dimensions remain complete. Cutoff catalog loading
+requires fresh table names in the current database.
+
+Query times and `Power Test Time` exclude analysis; `Total Time` includes it.
+Analysis adds no timing CSV rows. With `--json_summary_folder`, total and
+per-table analysis costs are written separately to `statistics/analyze-cost.json`.
+A summary folder is optional. Preparing a reused NDS summary folder removes the previous
+analysis-cost file, including when analysis is disabled.
+
+`--analyze_tables` is deprecated and prints a warning recommending
+`--analyze table`. It retains its existing behavior and timing rows, including
+being ignored for Delta and Iceberg inputs. The two options cannot appear
+together, even with `--analyze none`. Repeated `--analyze` options use the last
+value supplied.
+
 Arguments supported by `nds_power.py`:
 
 ```text
