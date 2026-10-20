@@ -350,6 +350,10 @@ session, so changing its current database does not affect another run and caller
 temporary views remain untouched. The Spark catalog and its managed table storage
 must be writable.
 
+These shallow-clone Delta runs require a classic Spark session. Spark Connect
+does not support the `newSession()` isolation they require; run them with
+`spark-submit` without `--spark_connect` or `SPARK_REMOTE`.
+
 Runtime settings requested in `--property_file` are applied to the run's session.
 Startup-only settings must match the existing Spark application when reusing a
 session.

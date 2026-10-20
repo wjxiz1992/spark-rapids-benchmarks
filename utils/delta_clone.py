@@ -12,6 +12,18 @@ def new_run_session(spark_session, spark_properties):
     existing session. Reapply those overrides, including custom RAPIDS keys.
     Leave matching startup/static settings alone; Spark rejects changing them.
     """
+    try:
+        from pyspark.sql.connect.session import SparkSession as ConnectSparkSession
+    except ImportError:
+        # Classic Spark does not require the optional Connect client dependencies.
+        pass
+    else:
+        if isinstance(spark_session, ConnectSparkSession):
+            raise ValueError(
+                "Delta shallow-clone runs require a classic Spark session: "
+                "Spark Connect does not support newSession() isolation. "
+                "Use spark-submit without --spark_connect or SPARK_REMOTE.")
+
     run_session = spark_session.newSession()
     for key, value in spark_properties.items():
         if run_session.conf.get(key, None) != value:

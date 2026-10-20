@@ -8,10 +8,26 @@ import unittest
 from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from delta_clone import DeltaCloneScope
+from delta_clone import DeltaCloneScope, new_run_session
 
 
 class DeltaCloneScopeTest(unittest.TestCase):
+    def test_connect_is_rejected_before_creating_clones(self):
+        try:
+            from pyspark.sql.connect.session import SparkSession as ConnectSparkSession
+        except ImportError:
+            self.skipTest('Spark Connect client dependencies are not installed')
+
+        # Construct a real Connect client without starting or contacting a server.
+        spark = ConnectSparkSession('sc://localhost:1')
+        try:
+            with patch.object(spark, 'sql') as sql:
+                with self.assertRaisesRegex(ValueError, 'require a classic Spark session'):
+                    new_run_session(spark, {})
+                sql.assert_not_called()
+        finally:
+            spark.client.close()
+
     @patch('delta_clone.uuid.uuid4')
     def test_clone_uses_unique_managed_database_and_quoted_source_path(self, uuid4):
         uuid4.return_value.hex = '0123456789abcdef'
