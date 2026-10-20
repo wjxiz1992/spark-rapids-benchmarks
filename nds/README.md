@@ -173,7 +173,10 @@ Don't forget to `export` Metastore content that contains database and table meta
 when you are about to shutdown the Metastore service.
 
 For [unmanaged tables](https://docs.databricks.com/lakehouse/data-objects.html#what-is-an-unmanaged-table),
-user doesn't need to create the Metastore service,  appending `--delta_unmanaged` to arguments will be enough.
+`nds_transcode.py --delta_unmanaged` writes path-based Delta tables without
+registering them in a metastore. Power and maintenance runs on these inputs
+create catalog-managed shallow clones and require a writable catalog and managed
+table storage, as described below.
 
 NOTE: To enabling Delta against different Spark versions, please modify the Delta package version accordingly in the template file.
 For more version compatibility information, please visit [compatibility with apache spark](https://docs.delta.io/latest/releases.html#compatibility-with-apache-spark).
@@ -344,19 +347,26 @@ file-backed tables expose their input rows through the catalog.
 
 For path-based Delta input, `--delta_unmanaged` creates a unique database of
 catalog-managed shallow clones for each run. Queries use those persistent table
-objects, while the source Delta tables remain unchanged. The database and all
-clones are dropped when the run finishes or fails. Each run uses a dedicated SQL
-session, so changing its current database does not affect another run and caller
-temporary views remain untouched. The Spark catalog and its managed table storage
-must be writable.
+objects, while the source Delta tables remain unchanged. Cleanup attempts to drop
+the database and all clones when the run finishes or fails. Cleanup failures are
+logged with the database name for manual removal, preserving query errors and
+successful-run results. Each run uses a dedicated SQL session, so changing its
+current database does not affect another run and caller temporary views remain
+untouched. The Spark catalog and its managed table storage must be writable.
+
+On multi-node clusters, set `spark.sql.warehouse.dir` to a shared filesystem or
+object-store URI that the driver and every executor can read and write, for
+example `--conf spark.sql.warehouse.dir=hdfs:///benchmarks/delta-clones`.
+Maintenance writes new files there, rather than under the source Delta paths.
+The default local `./spark-warehouse` is suitable only for local testing.
 
 These shallow-clone Delta runs require a classic Spark session. Spark Connect
 does not support the `newSession()` isolation they require; run them with
 `spark-submit` without `--spark_connect` or `SPARK_REMOTE`.
 
-Runtime settings requested in `--property_file` are applied to the run's session.
-Startup-only settings must match the existing Spark application when reusing a
-session.
+The run inherits the caller's runtime settings, with `--property_file` values
+taking precedence. Settings that Spark prevents changing retain the existing
+application's values and produce a warning when they differ.
 
 Shallow clones require Delta Lake 2.3 or later. The bundled Spark 3.3 Delta
 templates use `io.delta:delta-core_2.12:2.3.0`; choose the corresponding Delta
@@ -578,6 +588,10 @@ tables are not modified. Maintenance changes are visible only within the current
 failure, and later benchmark phases or runs start again from the immutable
 reference data. The run also uses a dedicated SQL session, leaving the caller's
 current database and temporary views unchanged.
+
+Delta maintenance uses the Hive catalog and requires a working Hive metastore.
+Configure the cluster's metastore rather than relying on the default local Derby
+metastore, and set the shared `spark.sql.warehouse.dir` described above.
 
 Note: The Delete functions in Data Maintenance cannot run successfully in Spark 3.2.0 and 3.2.1 due
 to a known Spark [issue](https://issues.apache.org/jira/browse/SPARK-39454). User can run it in Spark 3.2.2

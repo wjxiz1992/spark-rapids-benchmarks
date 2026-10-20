@@ -212,18 +212,25 @@ file-backed tables expose their input rows through the catalog.
 
 For Delta input, each run creates a unique database of catalog-managed shallow
 clones. Queries use those persistent table objects, while the source Delta tables
-remain unchanged. The database and all clones are dropped when the run finishes
-or fails. Each run uses a dedicated SQL session, so changing its current database
-does not affect another run and caller temporary views remain untouched. The Spark
-catalog and its managed table storage must be writable.
+remain unchanged. Cleanup attempts to drop the database and all clones when the
+run finishes or fails. Cleanup failures are logged with the database name for
+manual removal, preserving query errors and successful-run results. Each run
+uses a dedicated SQL session, so changing its current database does not affect
+another run and caller temporary views remain untouched. The Spark catalog and
+its managed table storage must be writable.
+
+On multi-node clusters, set `spark.sql.warehouse.dir` to a shared filesystem or
+object-store URI that the driver and every executor can read and write, for
+example `--conf spark.sql.warehouse.dir=hdfs:///benchmarks/delta-clones`.
+The default local `./spark-warehouse` is suitable only for local testing.
 
 These shallow-clone Delta runs require a classic Spark session. Spark Connect
 does not support the `newSession()` isolation they require; run them with
 `spark-submit` without `--spark_connect` or `SPARK_REMOTE`.
 
-Runtime settings requested in `--property_file` are applied to the run's session.
-Startup-only settings must match the existing Spark application when reusing a
-session.
+The run inherits the caller's runtime settings, with `--property_file` values
+taking precedence. Settings that Spark prevents changing retain the existing
+application's values and produce a warning when they differ.
 
 Shallow clones require Delta Lake 2.3 or later; use the Delta release compatible
 with the selected Spark version.

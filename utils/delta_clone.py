@@ -2,15 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Run-scoped managed shallow clones for immutable Delta benchmark inputs."""
 
+import logging
 import uuid
 
 
+logger = logging.getLogger(__name__)
+
+
 def new_run_session(spark_session, spark_properties):
-    """Isolate a clone run and preserve its explicitly requested configuration.
+    """Isolate a clone run, inheriting runtime settings before property overrides.
 
     newSession does not inherit runtime overrides applied by getOrCreate to an
-    existing session. Reapply those overrides, including custom RAPIDS keys.
-    Leave matching startup/static settings alone; Spark rejects changing them.
+    existing session. Copy the caller's settings, including custom RAPIDS keys,
+    then apply the property file. Warn about immutable settings instead of
+    trying to reset startup values that Spark may have normalized.
     """
     try:
         from pyspark.sql.connect.session import SparkSession as ConnectSparkSession
@@ -24,10 +29,25 @@ def new_run_session(spark_session, spark_properties):
                 "Spark Connect does not support newSession() isolation. "
                 "Use spark-submit without --spark_connect or SPARK_REMOTE.")
 
+    # PySpark's RuntimeConfig.getAll is only available starting in Spark 4.0.
+    settings = {}
+    entries = spark_session._jsparkSession.conf().getAll().iterator()
+    while entries.hasNext():
+        entry = entries.next()
+        settings[entry._1()] = entry._2()
+    settings.update(spark_properties)
+
     run_session = spark_session.newSession()
-    for key, value in spark_properties.items():
+    config_entry = spark_session._jvm.org.apache.spark.internal.config.ConfigEntry
+    for key, value in settings.items():
         if run_session.conf.get(key, None) != value:
-            run_session.conf.set(key, value)
+            # isModifiable also returns false for unregistered custom settings,
+            # although RuntimeConfig.set accepts them (including RAPIDS keys).
+            if run_session.conf.isModifiable(key) or config_entry.findEntry(key) is None:
+                run_session.conf.set(key, value)
+            else:
+                logger.warning('Ignoring non-modifiable Spark setting %s for the Delta run; '
+                               'keeping the existing application value', key)
     return run_session
 
 
@@ -66,14 +86,23 @@ class DeltaCloneScope:
         self._spark_session.sql(clone_sql)
 
     def close(self):
-        """Restore the session's database and delete all managed clone tables."""
+        """Attempt cleanup without hiding run errors or preventing result output."""
         if not self._is_open:
             return
-        self._spark_session.catalog.setCurrentDatabase(self.previous_database)
+        try:
+            self._spark_session.catalog.setCurrentDatabase(self.previous_database)
+        except Exception:
+            logger.warning('Failed to restore database %s after the Delta run',
+                           self.previous_database, exc_info=True)
         drop_database_sql = "DROP DATABASE {} CASCADE".format(self._database_identifier)
         print(drop_database_sql)
-        self._spark_session.sql(drop_database_sql)
-        self._is_open = False
+        try:
+            self._spark_session.sql(drop_database_sql)
+        except Exception:
+            logger.warning('Failed to drop Delta clone database %s; manual cleanup may be needed',
+                           self.database_name, exc_info=True)
+        else:
+            self._is_open = False
 
     def __enter__(self):
         return self

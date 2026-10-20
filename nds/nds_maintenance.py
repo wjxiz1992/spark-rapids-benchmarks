@@ -46,6 +46,7 @@ from nds_power import register_delta_tables
 from setup_utils import add_utils_to_sys_path
 add_utils_to_sys_path()
 from spark_utils import setQueryName, clearQueryName
+from delta_clone import new_run_session
 
 INSERT_FUNCS = [
     'LF_CR',
@@ -125,7 +126,7 @@ def create_spark_session(valid_queries, warehouse_path, warehouse_type,
     if warehouse_type == 'delta' and delta_unmanaged:
         # Register refresh-data views and clones in a run-owned namespace so the
         # caller's current database and temporary views remain untouched.
-        spark_session = spark_session.newSession()
+        spark_session = new_run_session(spark_session, {})
     return spark_session
 
 def get_maintenance_queries(spark_session, folder, valid_queries):

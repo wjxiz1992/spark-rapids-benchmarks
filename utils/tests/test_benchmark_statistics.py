@@ -106,6 +106,7 @@ class BenchmarkStatisticsTest(unittest.TestCase):
                         settings = {'spark.sql.defaultCatalog': 'custom',
                                     'spark.sql.warehouse.dir': '/caller/warehouse'}
                         session = Mock()
+                        session._jsparkSession.conf().getAll().iterator().hasNext.return_value = False
                         session.conf.get.return_value = 'app'
                         builder = Mock()
                         builder.config.side_effect = lambda key, value: settings.update({key: value}) or builder

@@ -71,6 +71,40 @@ class DeltaCloneScopeTest(unittest.TestCase):
             call('DROP DATABASE `nds_h_delta_run_fedcba9876543210` CASCADE'),
         ])
 
+    def test_cleanup_failure_preserves_run_error_and_allows_retry(self):
+        spark = Mock()
+        spark.catalog.currentDatabase.return_value = 'default'
+        scope = DeltaCloneScope(spark, 'nds_delta_run')
+        spark.sql.side_effect = RuntimeError('drop failed')
+        query_error = RuntimeError('original query failed')
+
+        with self.assertLogs('delta_clone', level='WARNING') as logs:
+            with self.assertRaises(RuntimeError) as raised:
+                with scope:
+                    raise query_error
+        self.assertIs(raised.exception, query_error)
+        self.assertIn(scope.database_name, '\n'.join(logs.output))
+        self.assertIn('drop failed', '\n'.join(logs.output))
+
+        spark.sql.side_effect = None
+        scope.close()
+        self.assertEqual(spark.sql.call_args_list[-2:], [
+            call('DROP DATABASE `{}` CASCADE'.format(scope.database_name)),
+            call('DROP DATABASE `{}` CASCADE'.format(scope.database_name)),
+        ])
+
+    def test_restore_failure_still_attempts_drop_after_success(self):
+        spark = Mock()
+        spark.catalog.currentDatabase.return_value = 'default'
+        scope = DeltaCloneScope(spark, 'nds_delta_run')
+        spark.catalog.setCurrentDatabase.side_effect = RuntimeError('restore failed')
+
+        with self.assertLogs('delta_clone', level='WARNING') as logs:
+            with scope:
+                pass
+        self.assertIn('restore failed', '\n'.join(logs.output))
+        spark.sql.assert_called_with('DROP DATABASE `{}` CASCADE'.format(scope.database_name))
+
 
 if __name__ == '__main__':
     unittest.main()

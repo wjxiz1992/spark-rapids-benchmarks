@@ -49,21 +49,23 @@ class DeltaRunSessionTest(unittest.TestCase):
             'spark.sql.shuffle.partitions': '7',
             'spark.sql.caseSensitive': 'true',
             'spark.rapids.sql.enabled': 'false',
-            # These settings cannot be set with RuntimeConfig.set, even to the
-            # same value. They must remain available from session/context startup.
-            'spark.sql.warehouse.dir': self.spark.conf.get('spark.sql.warehouse.dir'),
+            # Spark normalizes this raw path to a file: URI at startup.
+            'spark.sql.warehouse.dir': str(self.root / 'warehouse'),
             'spark.master': 'local[2]',
         }
         property_file = self.root / 'requested.properties'
         property_file.write_text(''.join('{}={}\n'.format(k, v) for k, v in properties.items()))
         self.spark.sql('SELECT 42 AS value').createOrReplaceTempView('caller_view')
+        self.spark.conf.set('spark.sql.adaptive.enabled', 'false')
         caller_database = self.spark.catalog.currentDatabase()
 
         def inspect_run(spark, *_):
             self.assertIsNot(spark, self.spark)
             self.assertIs(spark.sparkContext, self.spark.sparkContext)
             for key, value in properties.items():
-                self.assertEqual(spark.conf.get(key), value, key)
+                expected = self.spark.conf.get(key) if key == 'spark.sql.warehouse.dir' else value
+                self.assertEqual(spark.conf.get(key), expected, key)
+            self.assertEqual(spark.conf.get('spark.sql.adaptive.enabled'), 'false')
             # Verify the setting actually changes SQL analysis, not only its label.
             with self.assertRaises(AnalysisException):
                 spark.sql('SELECT mixed FROM (SELECT 1 AS MiXeD)')
@@ -89,11 +91,24 @@ class DeltaRunSessionTest(unittest.TestCase):
     def test_nds_h_preserves_requested_settings_when_reusing_session(self):
         self._check_properties(nds_h_power, (None, 0, 1, ['logical'], 'delta'), {})
 
-    def test_conflicting_static_setting_is_rejected(self):
-        with self.assertRaises(AnalysisException):
-            new_run_session(self.spark, {
+    def test_conflicting_static_setting_warns_and_keeps_application_value(self):
+        with self.assertLogs('delta_clone', level='WARNING') as logs:
+            run = new_run_session(self.spark, {
                 'spark.sql.warehouse.dir': str(self.root / 'different-warehouse'),
             })
+        self.assertEqual(run.conf.get('spark.sql.warehouse.dir'),
+                         self.spark.conf.get('spark.sql.warehouse.dir'))
+        self.assertIn('spark.sql.warehouse.dir', '\n'.join(logs.output))
+
+    def test_caller_settings_are_inherited_before_property_overrides(self):
+        self.spark.conf.set('spark.sql.adaptive.enabled', 'false')
+        self.spark.conf.set('spark.sql.shuffle.partitions', '13')
+        self.spark.conf.set('spark.rapids.sql.enabled', 'false')
+        run = new_run_session(self.spark, {'spark.sql.shuffle.partitions': '17'})
+        self.assertEqual(run.conf.get('spark.sql.adaptive.enabled'), 'false')
+        self.assertEqual(run.conf.get('spark.rapids.sql.enabled'), 'false')
+        self.assertEqual(run.conf.get('spark.sql.shuffle.partitions'), '17')
+        self.assertEqual(self.spark.conf.get('spark.sql.shuffle.partitions'), '13')
 
 
 if __name__ == '__main__':

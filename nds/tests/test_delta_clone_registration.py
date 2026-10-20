@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'nds'))
 import nds_maintenance
 import nds_power
+from delta_clone import DeltaCloneScope
 
 
 sys.path.insert(0, str(ROOT / 'nds-h'))
@@ -74,8 +75,20 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
         scope.clone_table.assert_called_once_with('/reference/lineitem', 'lineitem')
         scope.close.assert_called_once_with()
 
+    def test_registration_keeps_clone_error_if_drop_also_fails(self):
+        spark = Mock()
+        spark.catalog.currentDatabase.return_value = 'default'
+        clone_error = RuntimeError('clone failed')
+        spark.sql.side_effect = [None, clone_error, RuntimeError('drop failed')]
+        with patch.object(nds_h_power, 'get_schemas', return_value={'lineitem': None}), \
+                self.assertLogs('delta_clone', level='WARNING'):
+            with self.assertRaises(RuntimeError) as raised:
+                nds_h_power.register_delta_tables(spark, '/reference', [])
+        self.assertIs(raised.exception, clone_error)
+
     def test_nds_power_closes_clone_scope_on_failure_and_stops_session(self):
         shared_spark = Mock()
+        shared_spark._jsparkSession.conf().getAll().iterator().hasNext.return_value = False
         spark = Mock()
         spark.conf.get.return_value = 'application-nds'
         shared_spark.newSession.return_value = spark
@@ -103,6 +116,7 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
 
     def test_nds_h_power_closes_clone_scope_on_failure_and_stops_session(self):
         shared_spark = Mock()
+        shared_spark._jsparkSession.conf().getAll().iterator().hasNext.return_value = False
         spark = Mock()
         spark.conf.get.return_value = 'application-nds-h'
         shared_spark.newSession.return_value = spark
@@ -129,6 +143,7 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
 
     def test_maintenance_uses_run_owned_session_for_unmanaged_delta(self):
         shared_spark = Mock()
+        shared_spark._jsparkSession.conf().getAll().iterator().hasNext.return_value = False
         run_spark = Mock()
         shared_spark.newSession.return_value = run_spark
         builder = Mock()
@@ -142,10 +157,41 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
         shared_spark.newSession.assert_called_once_with()
         self.assertIs(returned, run_spark)
 
+    def test_power_drivers_write_results_when_clone_drop_fails(self):
+        cases = [
+            (nds_power, (None, None, None, 0, 1, ['logical']),
+             {'input_format': 'delta', 'delta_unmanaged': True}),
+            (nds_h_power, (None, 0, 1, ['logical'], 'delta'), {}),
+        ]
+        for driver, arguments, keywords in cases:
+            with self.subTest(driver=driver.__name__), tempfile.TemporaryDirectory() as directory:
+                shared_spark = Mock()
+                shared_spark._jsparkSession.conf().getAll().iterator().hasNext.return_value = False
+                spark = shared_spark.newSession.return_value
+                spark.conf.get.return_value = 'application-delta'
+                spark.catalog.currentDatabase.return_value = 'default'
+                scope = DeltaCloneScope(spark, 'nds_delta_run')
+                spark.sql.side_effect = RuntimeError('drop failed')
+                builder = Mock()
+                builder.appName.return_value.getOrCreate.return_value = shared_spark
+                report = Path(directory) / 'times.csv'
+
+                with patch.object(driver.SparkSession, 'builder', builder), \
+                        patch.object(driver, 'register_delta_tables', return_value=([], scope)), \
+                        patch.object(driver, 'setQueryName'), \
+                        patch.object(driver, 'clearQueryName'), \
+                        self.assertLogs('delta_clone', level='WARNING'):
+                    driver.run_query_stream(
+                        '/reference', None, {}, str(report), *arguments,
+                        keep_sc=True, allow_failure=True, **keywords)
+                self.assertIn('Power Test Time', report.read_text())
+
     def test_maintenance_closes_clone_scope_on_query_failure_and_stops_context(self):
         spark = Mock()
         spark.sparkContext.applicationId = 'application-maintenance'
-        scope = Mock()
+        spark.catalog.currentDatabase.return_value = 'default'
+        scope = DeltaCloneScope(spark, 'nds_delta_run')
+        spark.sql.side_effect = RuntimeError('drop failed')
         report = Mock()
         error = RuntimeError('maintenance query failed')
         report.report_on.side_effect = error
@@ -154,7 +200,8 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
                 patch.object(nds_maintenance, 'register_delta_tables',
                              return_value=([], scope)), \
                 patch.object(nds_maintenance, 'PysparkBenchReport', return_value=report), \
-                patch.object(nds_maintenance, 'setQueryName'):
+                patch.object(nds_maintenance, 'setQueryName'), \
+                self.assertLogs('delta_clone', level='WARNING'):
             with self.assertRaises(RuntimeError) as stopped:
                 nds_maintenance.run_query(
                     spark, {'DF_CS': ['DELETE FROM catalog_sales']},
@@ -162,7 +209,7 @@ class DeltaCloneRegistrationTest(unittest.TestCase):
                     '/reference', 'delta', False, delta_unmanaged=True)
 
         self.assertIs(stopped.exception, error)
-        scope.close.assert_called_once_with()
+        spark.sql.assert_called_with('DROP DATABASE `{}` CASCADE'.format(scope.database_name))
         spark.sparkContext.stop.assert_called_once_with()
 
     def test_maintenance_time_excludes_clone_setup_and_cleanup(self):
