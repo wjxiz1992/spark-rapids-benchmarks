@@ -9,6 +9,7 @@ on:
       - "nds/**"
       - "nds-h/**"
       - "utils/**"
+      - "sqlstorm/**"
       - ".github/workflows/benchmark-python.yml"
   push:
     branches: [dev]
@@ -16,6 +17,7 @@ on:
       - "nds/**"
       - "nds-h/**"
       - "utils/**"
+      - "sqlstorm/**"
       - ".github/workflows/benchmark-python.yml"
 
 jobs:
@@ -42,3 +44,5 @@ jobs:
         run: python -m unittest discover -s nds-h/tests -p 'test*.py'
       - name: Shared utility unit tests
         run: python -m unittest discover -s utils/tests -p 'test*.py'
+      - name: SQLStorm record and supervisor tests
+        run: python -m unittest discover -s sqlstorm/tests -p 'test*.py'
