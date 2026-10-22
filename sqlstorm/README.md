@@ -8,8 +8,15 @@ not a TPC score or controlled performance benchmark.
 
 - Upstream SQLStorm is pinned to `b3bb0b96794a6afe9bb8f3ff2b243562b779c40d`.
   The bundle retains the full 15,242-query denominator and source hashes.
-- The initial 20 candidate IDs use unchanged SQL. Conservative screening rejects
-  selected LIMIT, window, and known nondeterministic aggregate/function shapes.
+- The initial core contains 14 unchanged queries admitted by the first 20-query
+  compatibility campaign. Five original queries (111, 218, 243, 301, 474) use
+  FETCH/OFFSET syntax rejected by Spark 3.5.7 and require row-selection review;
+  query 337 failed Spark analysis and contains a correlated scalar subquery
+  requiring further compatibility triage. Their original
+  failures remain in [the discovery campaign](https://prod.blsm.nvidia.com/sw-gpu-spark-jenkins/job/allxu-sqlstorm-tpcds-pilot-spark2a/2/).
+  These cases remain in every full-corpus denominator and are not passing tests.
+  Conservative screening rejects selected LIMIT/FETCH/OFFSET, window, and known
+  nondeterministic aggregate/function shapes.
   Screening is not a general determinism proof. Unselected/review-needed queries
   remain visible; the pilot does not claim full-corpus validation.
 - A worker reuses one local Spark application per engine batch. CPU and GPU

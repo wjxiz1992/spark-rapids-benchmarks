@@ -7,9 +7,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from sqlstorm.common import compare_results, digest, encoded, scalar
+from sqlstorm.common import compare_results, digest, encoded, error_record, scalar
 from sqlstorm.bundle import review_flags
-from sqlstorm.run import pilot_passes, coverage_status
+from sqlstorm.run import pilot_passes, coverage_status, write_report
 
 
 class ExactResults(unittest.TestCase):
@@ -75,6 +75,8 @@ class ExactResults(unittest.TestCase):
 
     def test_conservative_determinism_screen(self):
         self.assertTrue(review_flags("SELECT * FROM t LIMIT 1"))
+        self.assertTrue(review_flags("SELECT * FROM t FETCH FIRST 1 ROW ONLY"))
+        self.assertTrue(review_flags("SELECT * FROM t OFFSET 0 ROWS FETCH NEXT 1 ROW ONLY"))
         self.assertTrue(review_flags("SELECT row_number() OVER (ORDER BY k) FROM t"))
         self.assertTrue(review_flags("SELECT collect_list(v) FROM t"))
         self.assertEqual([], review_flags("SELECT k, sum(v) FROM t GROUP BY k"))
@@ -87,6 +89,32 @@ class ExactResults(unittest.TestCase):
         self.assertFalse(pilot_passes([empty]))
         self.assertTrue(pilot_passes([empty, real]))
         self.assertFalse(pilot_passes([real, fallback]))
+
+    def test_completed_execution_does_not_imply_quality_pass(self):
+        query = dict(id="1", cpu=dict(status="ok"), gpu=dict(status="ok"),
+                     gpu_active_operators=["GpuProjectExec"],
+                     comparison=dict(status="match", row_count=1))
+        summary = dict(lifecycle_state="completed", queries=[query], scheduled_queries=1, corpus_count=15242)
+        write_report(self.root, summary)
+        self.assertEqual("PASS", json.loads((self.root / "summary.json").read_text())["quality_status"])
+        query["comparison"]["status"] = "not_validated"
+        write_report(self.root, summary)
+        self.assertEqual("FAILURE", summary["quality_status"])
+        self.assertIn("quality: FAILURE", (self.root / "report.html").read_text())
+        summary["lifecycle_state"] = "incomplete"
+        write_report(self.root, summary)
+        self.assertEqual("INCOMPLETE", summary["quality_status"])
+
+    def test_empty_exception_repr_does_not_lose_root_cause(self):
+        class CapturedError(Exception):
+            def __repr__(self):
+                return "CapturedError()"
+        try:
+            raise CapturedError("UNSUPPORTED_SUBQUERY: original root cause\n" + "plan node\n" * 2000)
+        except CapturedError as error:
+            record = error_record(error)
+        self.assertEqual("CapturedError", record["error_type"])
+        self.assertTrue(record["error"].startswith("UNSUPPORTED_SUBQUERY: original root cause"))
 
 
 if __name__ == "__main__":

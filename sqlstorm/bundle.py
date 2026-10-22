@@ -14,10 +14,12 @@ except ImportError:
     from common import atomic_json, digest
 
 UPSTREAM_REVISION = "b3bb0b96794a6afe9bb8f3ff2b243562b779c40d"
-PILOT_IDS = ["16", "30", "37", "47", "109", "111", "131", "164", "192", "218",
-             "243", "290", "301", "319", "337", "367", "404", "468", "474", "477"]
+# Core admitted by the initial 20-query compatibility campaign. The complete
+# corpus, including the six failed original queries, remains in every bundle.
+PILOT_IDS = ["16", "30", "37", "47", "109", "131", "164", "192", "290", "319",
+             "367", "404", "468", "477"]
 REVIEW_PATTERNS = {
-    "limit_requires_review": r"\bLIMIT\b",
+    "row_selection_requires_review": r"\b(LIMIT|FETCH|OFFSET)\b",
     "window_requires_review": r"\bOVER\s*\(",
     "nondeterministic_function_review":
         r"\b(random|rand|uuid|first|last|any_value|collect_list|collect_set|array_agg|string_agg|listagg)\s*\(",

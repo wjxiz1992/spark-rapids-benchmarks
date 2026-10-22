@@ -211,6 +211,8 @@ def pilot_passes(queries):
 
 
 def write_report(root, summary):
+    summary["quality_status"] = ("INCOMPLETE" if summary["lifecycle_state"] != "completed"
+                                 else "PASS" if pilot_passes(summary["queries"]) else "FAILURE")
     atomic_json(root / "summary.json", summary)
     suite = ET.Element("testsuite", name="SQLStorm Spark pilot", tests=str(len(summary["queries"])))
     for query in summary["queries"]:
@@ -237,7 +239,8 @@ def write_report(root, summary):
         rows.append("<tr>" + "".join("<td>" + html.escape(cell) + "</td>" for cell in cells) + "</tr>")
     (root / "report.html").write_text("<!doctype html><meta charset=utf-8><title>SQLStorm Spark pilot</title>"
         "<style>body{font:16px system-ui;margin:3em;max-width:1000px}td,th{padding:.5em;border:1px solid #ccc}table{border-collapse:collapse}</style>"
-        "<h1>SQLStorm Spark pilot</h1><p>" + html.escape(summary["lifecycle_state"]) + "</p>"
+        "<h1>SQLStorm Spark pilot</h1><p>Execution: " + html.escape(summary["lifecycle_state"])
+        + "; quality: " + summary["quality_status"] + "</p>"
         "<p>Selected queries: " + str(summary["scheduled_queries"]) + " / original corpus: " + str(summary["corpus_count"]) + "</p>"
         "<p>Unordered exact typed values. Timings are diagnostic. GPU evidence is a consumed Spark plan.</p>"
         "<table><tr><th>Original ID</th><th>CPU</th><th>GPU</th><th>Comparison</th><th>Rows</th><th>GPU evidence</th></tr>"

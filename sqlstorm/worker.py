@@ -7,9 +7,8 @@ import json
 import os
 from pathlib import Path
 import time
-import traceback
 
-from common import atomic_json, digest, encoded, event, scalar
+from common import atomic_json, digest, encoded, error_record, event, scalar
 
 
 def plan_evidence(df):
@@ -113,7 +112,7 @@ def main():
                 spark.sparkContext.cancelJobGroup(attempt)
                 result.update(status="capture_limit", error=str(exc))
             except Exception as exc:
-                result.update(error=repr(exc), traceback=traceback.format_exc()[-12000:])
+                result.update(error_record(exc))
             result["elapsed_seconds"] = time.monotonic() - started
             if result["elapsed_seconds"] > job["query_timeout"]:
                 result.update(status="timeout", error="Query exceeded deadline including capture")

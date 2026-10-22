@@ -7,8 +7,16 @@ import json
 import math
 import os
 from pathlib import Path
+import traceback
 
 POLICY = "spark_typed_unordered_multiset_v1"
+
+
+def error_record(error):
+    # PySpark captured exceptions can have an empty repr(). Preserve the actual
+    # message separately so a long analyzed plan cannot displace the root cause.
+    return dict(error_type=type(error).__name__, error=str(error),
+                traceback=traceback.format_exc()[-12000:])
 
 
 def digest(path):
