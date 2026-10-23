@@ -7,11 +7,30 @@ import time
 import unittest
 from unittest.mock import patch
 
+from sqlstorm.bundle import build, UPSTREAM_REVISION
 from sqlstorm.common import digest
 from sqlstorm.sweep import load_bundle, query_category, report
 
 
 class ExecutionSweep(unittest.TestCase):
+    def test_bundle_preserves_original_crlf_bytes_and_hash(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(
+                "sqlstorm.bundle.DATASETS", {"nds": ("tpcds", 1)}):
+            root = Path(temporary)
+            source = root / "source"
+            queries = source / "v1.0/tpcds/queries"
+            queries.mkdir(parents=True)
+            original = b"SELECT 1;\r\n"
+            (queries / "1.sql").write_bytes(original)
+            (queries.parent / "queries.sql").write_text("\\i v1.0/tpcds/queries/1.sql\n")
+            (source / "LICENSE").write_text("MIT test fixture")
+            with patch("sqlstorm.bundle.subprocess.check_output",
+                       side_effect=[UPSTREAM_REVISION, ""]):
+                value = build(source, root / "bundle", None)
+            copied = root / "bundle/queries/1.sql"
+            self.assertEqual(copied.read_bytes(), original)
+            self.assertEqual(digest(copied), value["corpus"][0]["sha256"])
+
     def make_bundle(self, folder):
         (folder / "queries").mkdir()
         corpus = []
