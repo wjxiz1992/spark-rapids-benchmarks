@@ -45,7 +45,7 @@ def build(source, output, selected, revision=UPSTREAM_REVISION, dataset="nds"):
     if selected is not None and (len(set(selected)) != len(selected) or not selected):
         raise ValueError("Selection must be nonempty and unique")
     manifest = collection_root / "queries.sql"
-    corpus, sql_by_id = [], {}
+    corpus, paths_by_id = [], {}
     for position, line in enumerate(manifest.read_text().splitlines(), 1):
         if not line.startswith("\\i "):
             continue
@@ -54,24 +54,24 @@ def build(source, output, selected, revision=UPSTREAM_REVISION, dataset="nds"):
         if not path.is_relative_to(collection_root / "queries") or path.suffix != ".sql":
             raise ValueError("Unexpected query path: " + relative)
         query_id = path.stem
-        if query_id in sql_by_id:
+        if query_id in paths_by_id:
             raise ValueError("Duplicate original query ID")
         sql = path.read_text()
-        sql_by_id[query_id] = sql
+        paths_by_id[query_id] = path
         corpus.append(dict(id=query_id, source_path=relative, position=position,
                            sha256=digest(path), review_flags=review_flags(sql)))
     if len(corpus) != expected_count:
         raise ValueError("Unexpected original " + dataset + " corpus population")
     if selected is None:
         selected = [query["id"] for query in corpus]
-    if set(selected) - sql_by_id.keys():
+    if set(selected) - paths_by_id.keys():
         raise ValueError("Selection includes unknown query IDs")
     output.mkdir(parents=True, exist_ok=False)
     (output / "queries").mkdir()
     shutil.copyfile(source / "LICENSE", output / "UPSTREAM_LICENSE")
     shutil.copyfile(manifest, output / "corpus-queries.sql")
     for query_id in selected:
-        (output / "queries" / (query_id + ".sql")).write_text(sql_by_id[query_id])
+        shutil.copyfile(paths_by_id[query_id], output / "queries" / (query_id + ".sql"))
     result = dict(schema_version="sqlstorm.spark.bundle.v1", dataset=dataset,
                   upstream_collection=collection, upstream_revision=actual,
                   corpus_manifest_sha256=digest(manifest), corpus_count=len(corpus),
