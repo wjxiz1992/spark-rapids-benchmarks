@@ -155,6 +155,10 @@ def _merge_update_data_local(temp_base, data_dir, range_start, range_end,
     Delete/inventory_delete tables produce identical content across all children,
     so only the first child's copy is kept — consistent with the HDFS approach
     in move_delete_date_tables().
+
+    overwrite_output replaces matching generated filenames, including delete
+    files. Other files remain so separate --range invocations can accumulate
+    their output in the same directory.
     """
     delete_tables = {'delete', 'inventory_delete'}
     for table in maintenance_table_names:
@@ -191,6 +195,10 @@ def _generate_update_data_local(args, data_dir, range_start, range_end, tool_pat
     for delete tables where all children produce an identically-named file).
     This eliminates the need for dsdgen's -force flag and prevents silent overwrites,
     consistent with the HDFS approach in generate_data_hdfs().
+
+    With --overwrite_output, generated files replace matching output filenames;
+    the output directory is not cleared. Earlier child ranges and unrelated
+    files are retained. Use a separate empty directory for a fresh dataset.
 
     Raises:
         Exception: if update data already exists and --overwrite_output is not set
@@ -394,7 +402,9 @@ if __name__ == "__main__":
                         '"--parallel 100 --range 100,200" is illegal.')
     parser.add_argument("--overwrite_output",
                         action="store_true",
-                        help="overwrite if there has already existing data in the path provided.")
+                        help="allow replacing existing output. In local --update mode, replace " +
+                        "matching generated filenames only; keep other files for incremental " +
+                        "--range generation.")
     parser.add_argument("--replication",
                         help="the number of replication factor when generating data to HDFS. " +
                         "if not set, the Hadoop job will use the setting in the Hadoop cluster.")

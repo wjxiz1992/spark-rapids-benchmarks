@@ -257,6 +257,8 @@ class TestGenerateUpdateDataLocal(unittest.TestCase):
 
         files = os.listdir(os.path.join(self.data_dir, 's_catalog_order'))
         self.assertIn('s_catalog_order_1_2.dat', files)
+        # Overwrite replaces matching generated names, not the entire directory.
+        self.assertIn('old.dat', files)
 
     def test_no_force_flag_passed_to_dsdgen(self):
         """Verify dsdgen is never called with -force (the whole point of this redesign)."""
@@ -290,10 +292,15 @@ class TestGenerateUpdateDataLocal(unittest.TestCase):
     def test_incremental_range_preserves_previous_data(self):
         """Simulate two --range invocations."""
         args = self._make_args()
+        args.parallel = '4'
         tool_path = Path(self.mock_dsdgen)
 
         # First range: children 1-2
         _generate_update_data_local(args, self.data_dir, 1, 2, tool_path)
+
+        delete_file = Path(self.data_dir, 'delete', 'delete_1.dat')
+        # Distinguish replacement from keeping an identical generated delete file.
+        delete_file.write_text('stale delete data from a previous run')
 
         # Second range: children 3-4 (need --overwrite_output since data exists)
         args_range2 = self._make_args(overwrite=True)
@@ -302,15 +309,13 @@ class TestGenerateUpdateDataLocal(unittest.TestCase):
 
         cat_order_dir = os.path.join(self.data_dir, 's_catalog_order')
         files = sorted(os.listdir(cat_order_dir))
-        self.assertIn('s_catalog_order_1_2.dat', files)
+        self.assertIn('s_catalog_order_1_4.dat', files)
+        self.assertIn('s_catalog_order_2_4.dat', files)
         self.assertIn('s_catalog_order_3_4.dat', files)
         self.assertIn('s_catalog_order_4_4.dat', files)
 
-        # Delete file should still be from first range (not overwritten)
-        delete_dir = os.path.join(self.data_dir, 'delete')
-        with open(os.path.join(delete_dir, 'delete_1.dat')) as f:
-            content = f.read()
-        self.assertIn('update=1', content)
+        # Explicit overwrite refreshes the shared delete file in the second range.
+        self.assertEqual('delete update=1', delete_file.read_text())
 
 
 if __name__ == '__main__':
