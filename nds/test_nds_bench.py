@@ -1,18 +1,8 @@
-# Copyright (c) 2026, NVIDIA CORPORATION.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
 import unittest
+from pathlib import Path
 from unittest.mock import call, patch
 
 import nds_bench
@@ -32,14 +22,23 @@ class NdsBenchRangeTest(unittest.TestCase):
                     nds_bench.get_num_streams_in_throughput(num_streams)
 
     def test_throughput_stream_ranges(self):
-        self.assertEqual([1, 2, 3, 4],
-                         nds_bench.get_stream_range(9, 1))
-        self.assertEqual([5, 6, 7, 8],
-                         nds_bench.get_stream_range(9, 2))
+        for num_streams, first_streams, second_streams in [
+                (9, [1, 2, 3, 4], [5, 6, 7, 8]),
+                (13, [1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12])]:
+            with self.subTest(num_streams=num_streams):
+                self.assertEqual(
+                    first_streams, nds_bench.get_stream_range(num_streams, 1))
+                self.assertEqual(
+                    second_streams, nds_bench.get_stream_range(num_streams, 2))
 
     def test_refresh_run_ranges(self):
-        self.assertEqual([1, 2], nds_bench.get_refresh_range(9, 1))
-        self.assertEqual([3, 4], nds_bench.get_refresh_range(9, 2))
+        for num_streams, first_refreshes, second_refreshes in [
+                (9, [1, 2], [3, 4]), (13, [1, 2, 3], [4, 5, 6])]:
+            with self.subTest(num_streams=num_streams):
+                self.assertEqual(
+                    first_refreshes, nds_bench.get_refresh_range(num_streams, 1))
+                self.assertEqual(
+                    second_refreshes, nds_bench.get_refresh_range(num_streams, 2))
 
     def test_rejects_invalid_test_number(self):
         for first_or_second in [0, 3]:
@@ -55,19 +54,23 @@ class NdsBenchRefreshRunTest(unittest.TestCase):
     @patch("nds_bench.subprocess.run")
     def test_data_gen_creates_one_refresh_set_per_throughput_stream(
             self, mock_run):
-        nds_bench.run_data_gen("100", "4", "/data/raw", "hdfs", 9)
+        for num_streams, refresh_count in [(9, 4), (13, 6)]:
+            with self.subTest(num_streams=num_streams):
+                mock_run.reset_mock()
+                nds_bench.run_data_gen(
+                    "100", "4", "/data/raw", "hdfs", num_streams)
 
-        expected_calls = [
-            call(["python3", "nds_gen_data.py", "hdfs", "100", "4",
-                  "/data/raw", "--overwrite_output"], check=True)
-        ]
-        expected_calls.extend(
-            call(["python3", "nds_gen_data.py", "hdfs", "100", "4",
-                  f"/data/raw_{i}", "--overwrite_output", "--update", str(i)],
-                 check=True)
-            for i in range(1, 5)
-        )
-        self.assertEqual(expected_calls, mock_run.call_args_list)
+                expected_calls = [
+                    call(["python3", "nds_gen_data.py", "hdfs", "100", "4",
+                          "/data/raw", "--overwrite_output"], check=True)
+                ]
+                expected_calls.extend(
+                    call(["python3", "nds_gen_data.py", "hdfs", "100", "4",
+                          f"/data/raw_{i}", "--overwrite_output", "--update", str(i)],
+                         check=True)
+                    for i in range(1, refresh_count + 1)
+                )
+                self.assertEqual(expected_calls, mock_run.call_args_list)
 
     @patch("nds_bench.subprocess.run")
     def test_data_gen_validates_stream_count_before_starting(self, mock_run):
@@ -101,15 +104,30 @@ class NdsBenchRefreshRunTest(unittest.TestCase):
     @patch("nds_bench.get_refresh_time")
     def test_maintenance_time_reads_only_its_refresh_reports(
             self, mock_get_refresh_time):
-        mock_get_refresh_time.side_effect = [1.01, 2.01]
+        for test_number, refresh_numbers in [(1, [1, 2]), (2, [3, 4])]:
+            with self.subTest(test_number=test_number):
+                mock_get_refresh_time.reset_mock()
+                mock_get_refresh_time.side_effect = [1.01, 2.01]
 
-        result = nds_bench.get_maintenance_time("/reports/maintenance", 9, 2)
+                result = nds_bench.get_maintenance_time(
+                    "/reports/maintenance", 9, test_number)
 
-        self.assertEqual(3.1, result)
-        self.assertEqual(
-            [call("/reports/maintenance_3.csv"),
-             call("/reports/maintenance_4.csv")],
-            mock_get_refresh_time.call_args_list)
+                self.assertEqual(3.1, result)
+                self.assertEqual(
+                    [call(f"/reports/maintenance_{i}.csv") for i in refresh_numbers],
+                    mock_get_refresh_time.call_args_list)
+
+    @patch("nds_bench.subprocess.run")
+    def test_full_bench_validates_stream_count_before_starting(self, mock_run):
+        with (Path(__file__).parent / "bench.yml").open() as config_file:
+            config = nds_bench.yaml.safe_load(config_file)
+        config["data_gen"]["skip"] = True
+        config["generate_query_stream"]["num_streams"] = 11
+
+        with self.assertRaisesRegex(ValueError, "num_streams must equal"):
+            nds_bench.run_full_bench(config)
+
+        mock_run.assert_not_called()
 
 
 if __name__ == "__main__":

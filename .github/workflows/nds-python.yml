@@ -6,14 +6,12 @@ name: NDS Python checks
 on:
   pull_request:
     paths:
-      - "nds/nds_bench.py"
-      - "nds/test_nds_bench.py"
+      - "nds/*.py"
       - ".github/workflows/nds-python.yml"
   push:
     branches: [dev]
     paths:
-      - "nds/nds_bench.py"
-      - "nds/test_nds_bench.py"
+      - "nds/*.py"
       - ".github/workflows/nds-python.yml"
 
 jobs:
@@ -33,4 +31,5 @@ jobs:
       - name: Compile
         run: python -m py_compile nds/nds_bench.py nds/test_nds_bench.py
       - name: Unit tests
-        run: PYTHONPATH=nds python -m unittest -v nds/test_nds_bench.py
+        working-directory: nds
+        run: python -m unittest -v test_*.py

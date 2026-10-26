@@ -129,7 +129,8 @@ optional arguments:
   --overwrite_output  overwrite if there has already existing data in the path provided.
   --replication REPLICATION
                       the number of replication factor when generating data to HDFS. if not set, the Hadoop job will use the setting in the Hadoop cluster.
-  --update UPDATE     generate update dataset <n>. <n> is identical to the number of streams used in the Throughput Tests of the benchmark
+  --update UPDATE     generate refresh dataset <n>, where <n> is the refresh set number from 1 to Sq,
+                      and Sq is the number of streams in each Throughput Test.
 ```
 
 Example command:
@@ -591,6 +592,19 @@ query_output_gpu \
 [nds_bench.py](./nds_bench.py) along with its yaml config file [bench.yml](./bench.yml) is the script
 to run the whole process NDS benchmark to get final metrics.
 User needs to fill in the config file to specify the parameters of the benchmark.
+
+Set `generate_query_stream.num_streams = 2 * Sq + 1`, where `Sq` is even and at least 4.
+For example, `num_streams: 9` selects four streams in each Throughput Test, four refresh
+data sets in total, and two refresh runs in each Maintenance Test. Invalid configurations,
+including the previously accepted small test values 3, 5, and 7, fail at startup before
+any benchmark job runs, even when data generation is skipped.
+
+Results from the corrected refresh counts cannot be compared directly with older runs.
+For `num_streams: 9`, the total number of maintenance refresh runs decreases from eight
+to four. If refresh costs are otherwise unchanged, maintenance time is approximately
+halved and the final score rises by about 19% (`2 ** (1 / 4)`) without a real speedup.
+Rerun older measurements with the corrected refresh counts for comparisons.
+
 User can specify the `skip` field in the config file to skip certain part of the benchmarks.
 Please note: each part of the benchmark will produce its report file for necessary metrics like total
 execution time, start or end timestamp. The final metrics are calculated by those reports. Skipping
