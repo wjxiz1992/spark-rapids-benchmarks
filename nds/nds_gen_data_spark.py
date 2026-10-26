@@ -53,9 +53,10 @@ Usage:
 Example (K8s):
     spark-submit --master k8s://https://<api-server> \\
         --deploy-mode cluster \\
-        --conf spark.kubernetes.container.image=<image-with-spark> \\
-        --archives tpcds-gen/target/lib/dsdgen.tar.gz#dsdgen \\
-        nds_gen_data_spark.py 100 100 hdfs:///data/raw_sf100 --overwrite
+        --conf spark.kubernetes.container.image=<image-with-spark-and-dsdgen> \\
+        --archives local:///opt/spark/work-dir/dsdgen.tar.gz#dsdgen \\
+        local:///opt/spark/work-dir/nds_gen_data_spark.py \\
+        100 100 hdfs:///data/raw_sf100 --overwrite
 
 Example (YARN):
     spark-submit --master yarn \\
@@ -182,6 +183,10 @@ def run_dsdgen_and_read(child_index, scale, parallel, update=None):
             elif fname.endswith(".dat"):
                 # Delete / inventory_delete tables have different naming:
                 # delete_<update>.dat, inventory_delete_<update>.dat
+                # Every child generates identical delete data. Keep child 1's
+                # copy only, even when children are submitted in separate ranges.
+                if child_index != 1:
+                    continue
                 for special in ("inventory_delete", "delete"):
                     if fname.startswith(special):
                         table_name = special
@@ -331,7 +336,7 @@ def main():
     # Convert to DataFrame: [table_name: string, value: string]
     # partitionBy("table_name") writes separate directories per table WITHOUT shuffle —
     # each task independently splits its output into per-table files.
-    df = spark.createDataFrame(all_data_rdd, ["table_name", "value"])
+    df = spark.createDataFrame(all_data_rdd, "table_name string, value string")
 
     # Determine write mode:
     #   --range   → append (incremental generation across multiple spark-submit runs)

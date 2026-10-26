@@ -162,9 +162,13 @@ following conditions are true:
    and `hdfs-site.xml`) so both sides can access the same HDFS cluster.
 2. `output_dir` is an explicit HDFS path (for example, `hdfs:///data/raw_sf1000`
    or `hdfs://<namenode-host>:8020/data/raw_sf1000`) instead of a local path.
-3. The `dsdgen` archive is provided with `--archives` using a shell-quoted value
-   when needed (zsh users should quote `#`):  
-   `--archives 'tpcds-gen/target/lib/dsdgen.tar.gz#dsdgen'`.
+3. The application and `dsdgen` archive are present in the container image at
+   `/opt/spark/work-dir/nds_gen_data_spark.py` and
+   `/opt/spark/work-dir/dsdgen.tar.gz`, as in the images described below.
+   Use `local:///` URIs for these image-local dependencies, and shell-quote
+   `--archives` values when needed (zsh users should quote `#`). To submit files
+   from the client instead, configure `spark.kubernetes.file.upload.path` with a
+   Hadoop-compatible upload location accessible to the driver and executors.
 4. Python minor versions are consistent between driver and executor environments
    (for example, both are Python 3.12).
 5. For incremental generation (`--range`), do not rerun overlapping child ranges,
@@ -177,8 +181,9 @@ spark-submit --master k8s://https://<k8s-api-server> \
     --deploy-mode cluster \
     --conf spark.kubernetes.container.image=<spark-image> \
     --conf spark.executor.instances=10 \
-    --archives tpcds-gen/target/lib/dsdgen.tar.gz#dsdgen \
-    nds_gen_data_spark.py 1000 200 hdfs:///data/raw_sf1000 --overwrite
+    --archives 'local:///opt/spark/work-dir/dsdgen.tar.gz#dsdgen' \
+    local:///opt/spark/work-dir/nds_gen_data_spark.py \
+    1000 200 hdfs:///data/raw_sf1000 --overwrite
 ```
 
 For incremental generation (split across multiple spark-submit runs):
@@ -355,7 +360,24 @@ kubectl run nds-test --image=nds-datagen:<tag> --image-pull-policy=Never \
 }'
 
 # 6. Wait for completion and check logs
-kubectl wait --for=condition=Ready=false pod/nds-test --timeout=300s
+deadline=$((SECONDS + 300))
+while true; do
+    phase=$(kubectl get pod nds-test -o jsonpath='{.status.phase}') || exit 1
+    case "$phase" in
+        Succeeded) break ;;
+        Failed)
+            echo "Data-generation pod failed" >&2
+            kubectl logs nds-test
+            exit 1
+            ;;
+    esac
+    if (( SECONDS >= deadline )); then
+        echo "Timed out waiting for data-generation pod (phase: $phase)" >&2
+        kubectl describe pod nds-test
+        exit 1
+    fi
+    sleep 5
+done
 kubectl logs nds-test | tail -5
 # Expected: "=== Data generation complete: /data/nds_test ==="
 
