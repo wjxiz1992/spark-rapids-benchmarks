@@ -603,6 +603,14 @@ Delta maintenance uses the Hive catalog and requires a working Hive metastore.
 Configure the cluster's metastore rather than relying on the default local Derby
 metastore, and set the shared `spark.sql.warehouse.dir` described above.
 
+`Data Maintenance Time` now ends before SparkContext shutdown for every storage
+mode, including Iceberg and managed Delta. For unmanaged Delta, it also excludes
+clone setup and cleanup. Earlier versions included SparkContext shutdown when
+`--keep_sc` was not set. Because this duration contributes to the composite
+benchmark score, timings and scores using these different boundaries are not
+directly comparable. Further timing-boundary corrections are tracked in
+[#297](https://github.com/NVIDIA/cudf-spark-benchmarks/issues/297).
+
 Note: The Delete functions in Data Maintenance cannot run successfully in Spark 3.2.0 and 3.2.1 due
 to a known Spark [issue](https://issues.apache.org/jira/browse/SPARK-39454). User can run it in Spark 3.2.2
 or later. More details including work-around for version 3.2.0 and 3.2.1 could be found in this
