@@ -208,8 +208,8 @@ def _generate_update_data_local(args, data_dir, range_start, range_end, tool_pat
         Exception: if update data already exists and --overwrite_output is not set
         Exception: if dsdgen fails
     """
-    # Preserve symlink/.. traversal; only strip trailing separators for sibling staging.
-    data_dir = get_abs_path(os.fspath(data_dir)).rstrip(os.sep) or os.sep
+    # Resolve filesystem traversal before choosing a sibling staging directory.
+    data_dir = os.path.realpath(data_dir)
     if not os.path.isdir(data_dir):
         os.makedirs(data_dir)
 
@@ -221,8 +221,7 @@ def _generate_update_data_local(args, data_dir, range_start, range_end, tool_pat
 
     # Only overwrite removes output. Otherwise staging needs no parent write access.
     staging_dir = os.path.dirname(data_dir) if args.overwrite_output else data_dir
-    # mkdtemp normalizes its return value, so resolve the staging location first.
-    temp_base = tempfile.mkdtemp(prefix='_temp_update_', dir=os.path.realpath(staging_dir))
+    temp_base = tempfile.mkdtemp(prefix='_temp_update_', dir=staging_dir)
 
     work_dir = tool_path.parent
     procs = []
