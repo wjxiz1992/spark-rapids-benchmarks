@@ -4,9 +4,29 @@
 import argparse
 import collections
 import json
+import itertools
 from pathlib import Path
 
-from .common import atomic_json, compare_results
+from .common import atomic_json, compare_results, digest
+
+
+def order_review(cpu_capture, gpu_capture, sql_path, sql_hash):
+    with cpu_capture.open() as c, gpu_capture.open() as g:
+        equal = all(a == b for a, b in itertools.zip_longest(c, g))
+    if equal:
+        return dict(row_order="identical")
+    if digest(sql_path) != sql_hash:
+        raise ValueError("Frozen SQL changed before ordering review")
+    import sqlglot
+    try:
+        tree = sqlglot.parse_one(sql_path.read_text(), read="spark")
+    except Exception:
+        return dict(status="requires_order_review", reason="ordering_contract_not_parsed")
+    if tree.args.get("order"):
+        # Ties may legally differ, but do not silently treat an observed
+        # ordered-output difference as a complete correctness pass.
+        return dict(status="requires_order_review", reason="ordered_output_differs")
+    return dict(row_order="unspecified_by_query")
 
 
 def records(root):
@@ -37,8 +57,12 @@ def compare(cpu, gpu):
         elif not c.get("capture") or not g.get("capture") or c.get("capture_status") == "capture_limit" or g.get("capture_status") == "capture_limit":
             result = dict(status="not_validated", reason="complete_capture_unavailable")
         else:
-            result = compare_results(c, g, cpu / "batches" / ("%05d" % c["batch"]),
-                                     gpu / "batches" / ("%05d" % g["batch"]))
+            cb, gb = [root / "batches" / ("%05d" % record["batch"])
+                      for root, record in ((cpu, c), (gpu, g))]
+            result = compare_results(c, g, cb, gb)
+            if result["status"] == "match":
+                result.update(order_review(cb / c["capture"], gb / g["capture"],
+                                           cpu / "inputs/bundle/queries" / (qid + ".sql"), cm["query_sha256"][qid]))
         values.append(dict(id=qid, **result, cpu=c, gpu=g))
     return dict(dataset=cm["dataset"], selected=len(cm["selected"]),
                 comparison_scope="Spark CPU versus GPU on the identical adapted SQL",

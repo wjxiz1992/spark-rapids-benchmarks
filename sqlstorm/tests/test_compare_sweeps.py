@@ -7,9 +7,20 @@ import unittest
 
 from sqlstorm.common import atomic_json, digest
 from sqlstorm.compare_sweeps import compare
+from sqlstorm.compare_sweeps import order_review
 
 
 class Sweeps(unittest.TestCase):
+    def test_ordered_output_difference_requires_review_instead_of_a_multiset_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            c, g, sql = [root / name for name in ("cpu", "gpu", "q.sql")]
+            c.write_text('[1]\n[2]\n'); g.write_text('[2]\n[1]\n')
+            sql.write_text('SELECT x FROM t ORDER BY x')
+            self.assertEqual("requires_order_review", order_review(c, g, sql, digest(sql))["status"])
+            sql.write_text('SELECT x FROM t')
+            self.assertEqual("unspecified_by_query", order_review(c, g, sql, digest(sql))["row_order"])
+
     def test_separate_capture_roots_exact_values_overflow_and_wrong_oracles(self):
         with tempfile.TemporaryDirectory() as temporary:
             cpu, gpu = [Path(temporary) / e for e in ("cpu", "gpu")]
