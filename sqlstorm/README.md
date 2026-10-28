@@ -78,6 +78,14 @@ Neither the existing distributed NDS job nor its 3 TB data is modified.
 
 ## GPU execution sweep
 
+The sweep also accepts explicitly adapted bundles from `sqlstorm.adapt`.
+It validates executable and original hashes, keeps the complete original corpus
+denominator, and attempts every selected query including those flagged for
+semantic review. Each result identifies both original and executed SQL hashes.
+Use `--expected-spark-version 4.0.4` to verify the observed runtime. An adapted
+execution success is still not a CPU/GPU correctness verdict or rewrite proof;
+those comparisons are separate and never inferred from execution status.
+
 The separate `sqlstorm.sweep` entry point executes the complete pinned NDS
 (15,242 queries) or NDS-H (17,036 queries) collection in bounded batches. It
 preserves original SQL, including queries marked for review, and performs no

@@ -123,7 +123,8 @@ def load_bundle(path):
     if not manifest["selected"] or len(set(manifest["selected"])) != len(manifest["selected"]):
         raise ValueError("Invalid selection")
     adaptations = {q["id"]: q for q in manifest.get("adaptations", [])}
-    if adaptations and set(adaptations) != set(manifest["selected"]):
+    if adaptations and (set(adaptations) != set(manifest["selected"])
+                        or len(adaptations) != len(manifest["adaptations"])):
         raise ValueError("Missing adaptation provenance")
     for qid in manifest["selected"]:
         if qid not in corpus or not qid.isdecimal():
@@ -131,7 +132,8 @@ def load_bundle(path):
         expected = adaptations[qid]["adapted_sha256"] if adaptations else corpus[qid]["sha256"]
         if digest(path / "queries" / (qid + ".sql")) != expected:
             raise ValueError("Changed executable SQL: " + qid)
-        if adaptations and digest(path / "originals" / (qid + ".sql")) != corpus[qid]["sha256"]:
+        if adaptations and (digest(path / "originals" / (qid + ".sql")) != corpus[qid]["sha256"]
+                            or adaptations[qid]["original_sha256"] != corpus[qid]["sha256"]):
             raise ValueError("Changed original SQL: " + qid)
     return manifest, corpus
 

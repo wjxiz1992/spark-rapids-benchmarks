@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Execute a frozen corpus in bounded Spark batches, without a correctness oracle.
 
-Every original selected query is attempted, including review-flagged SQL. No
-query is rewritten or admitted by a compatibility/GPU-plan coverage filter.
+Every selected query is attempted, including review-flagged SQL. An explicitly
+adapted bundle preserves both original and executable hashes. The sweep itself
+does not rewrite SQL or apply compatibility/GPU-plan coverage filters.
 Successful execution does not establish CPU/GPU result equality or speedup.
 """
 import argparse
@@ -48,8 +49,14 @@ def load_bundle(path, selection=None):
     selected = bundle["selected"] if selection is None else selection
     if not selected or len(set(selected)) != len(selected):
         raise ValueError("Selected query IDs must be unique and nonempty")
+    if bundle.get("adaptations"):
+        from .adapt import load_bundle as load_adapted
+        bundle, corpus = load_adapted(path)
+        if set(selected) - set(bundle["selected"]):
+            raise ValueError("Selection is not in the frozen adapted bundle")
+        return bundle, corpus, selected
     for query_id in selected:
-        if query_id not in corpus:
+        if query_id not in corpus or not query_id.isdecimal():
             raise ValueError("Unknown query ID: " + query_id)
         query = path / "queries" / (query_id + ".sql")
         if not query.is_file() or digest(query) != corpus[query_id]["sha256"]:
@@ -93,6 +100,7 @@ def main(argv=None):
     parser.add_argument("--batch-seconds", type=int, default=1200)
     parser.add_argument("--query-timeout", type=int, default=30)
     parser.add_argument("--startup-timeout", type=int, default=180)
+    parser.add_argument("--expected-spark-version", help="Fail startup if the observed Spark version differs")
     parser.add_argument("--campaign-hours", type=float, default=72)
     parser.add_argument("--cores", type=int, default=4)
     parser.add_argument("--driver-memory", choices=("4g", "8g"), default="4g")
@@ -119,7 +127,7 @@ def main(argv=None):
     frozen = root / "inputs/bundle"
     shutil.copytree(args.bundle, frozen)
     source = Path(__file__).resolve().parent
-    for name in ("worker.py", "common.py", "run.py", "sweep.py", "bundle.py"):
+    for name in ("worker.py", "common.py", "run.py", "sweep.py", "bundle.py", "adapt.py"):
         shutil.copyfile(source / name, root / "inputs/source" / name)
     for name in ("LICENSE", "NOTICE", "TPC EULA.txt"):
         if (source.parent / name).is_file():
@@ -128,6 +136,8 @@ def main(argv=None):
     manifest = dict(schema_version="sqlstorm.spark.execution_sweep.v1", dataset=bundle["dataset"],
                     upstream_revision=bundle["upstream_revision"], corpus_count=len(corpus),
                     selected=selected, engine=args.engine, started_epoch=began,
+                    adaptation=bundle.get("adaptation"),
+                    query_sha256={qid: digest(frozen / "queries" / (qid + ".sql")) for qid in selected},
                     started_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     pid=os.getpid(), host=socket.gethostname(), data=identity,
                     plugin_sha256=digest(args.plugin_jar), sql_configuration=SQL_CONF,
@@ -135,7 +145,7 @@ def main(argv=None):
                                 query_seconds=args.query_timeout, cores=args.cores,
                                 driver_memory=args.driver_memory),
                     runtime=dict(spark_home=str(args.spark_home), python=str(args.python),
-                                 plugin_jar=str(args.plugin_jar)),
+                                 plugin_jar=str(args.plugin_jar), expected_spark_version=args.expected_spark_version),
                     source_sha256={p.name: digest(p) for p in (root / "inputs/source").iterdir()})
     atomic_json(root / "manifest.json", manifest)
     results, pending, number = {}, list(selected), 0
@@ -157,7 +167,8 @@ def main(argv=None):
                 if query_id in results:
                     raise ValueError("Query was executed twice: " + query_id)
                 result = dict(result, dataset=bundle["dataset"], batch=number,
-                              sql_sha256=corpus[query_id]["sha256"],
+                              sql_sha256=manifest["query_sha256"][query_id],
+                              original_sql_sha256=corpus[query_id]["sha256"],
                               correctness_checked=False, category=query_category(result))
                 results[query_id] = result
                 event(root / "results.jsonl", result)
@@ -179,6 +190,10 @@ def main(argv=None):
     unchanged = identity == dataset_identity(args.data, 4096 * 1024 ** 2, args.tables)
     if not unchanged:
         failure = "Dataset changed during execution"
+    if (manifest["plugin_sha256"] != digest(args.plugin_jar) or any(
+            digest(frozen / "queries" / (qid + ".sql")) != sha
+            for qid, sha in manifest["query_sha256"].items())):
+        failure = "Executable SQL/plugin changed during execution"
     state = "complete" if not pending and failure is None else "incomplete"
     summary = report(root, manifest, results, state, failure)
     print(json.dumps(summary), flush=True)

@@ -38,6 +38,7 @@ class ExecutionSweep(unittest.TestCase):
             path = folder / "queries" / (query_id + ".sql")
             path.write_text(sql)
             corpus.append(dict(id=query_id, sha256=digest(path),
+                               source_path="v1.0/tpcds/queries/" + query_id + ".sql",
                                review_flags=["row_selection_requires_review"]))
         value = dict(dataset="nds", corpus_count=2, corpus=corpus, selected=["1", "2"])
         (folder / "bundle.json").write_text(json.dumps(value))
@@ -70,6 +71,30 @@ class ExecutionSweep(unittest.TestCase):
             (root / "bundle.json").write_text(json.dumps(value))
             with self.assertRaisesRegex(ValueError, "duplicate corpus"):
                 load_bundle(root)
+
+    def test_adapted_execution_retains_provenance_and_review_flagged_queries(self):
+        from sqlstorm.adapt import build as adapt
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(
+                "sqlstorm.sweep.DATASETS", {"nds": ("tpcds", 2)}):
+            root = Path(temporary)
+            source = root / "original"
+            source.mkdir()
+            value = self.make_bundle(source)
+            value["upstream_revision"] = UPSTREAM_REVISION
+            (source / "queries/1.sql").write_text("SELECT 1 FETCH FIRST 1 ROWS ONLY")
+            value["corpus"][0]["sha256"] = digest(source / "queries/1.sql")
+            (source / "bundle.json").write_text(json.dumps(value))
+            (source / "UPSTREAM_LICENSE").write_text("MIT")
+            (source / "corpus-queries.sql").write_text("original corpus")
+            adapted = root / "adapted"
+            adapt(source, adapted, ["1", "2"])
+            manifest, corpus, selected = load_bundle(adapted)
+            self.assertEqual(["1", "2"], selected)
+            self.assertNotEqual(corpus["1"]["sha256"], manifest["adaptations"][0]["adapted_sha256"])
+            self.assertEqual(["1"], load_bundle(adapted, ["1"])[2])
+            (adapted / "queries/1.sql").write_text("SELECT 999")
+            with self.assertRaisesRegex(ValueError, "Changed executable SQL"):
+                load_bundle(adapted)
 
     def test_successful_execution_is_never_reported_as_correctness_pass(self):
         with tempfile.TemporaryDirectory() as temporary:
