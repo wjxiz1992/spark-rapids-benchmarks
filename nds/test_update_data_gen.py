@@ -290,6 +290,37 @@ class TestGenerateUpdateDataLocal(unittest.TestCase):
         self.assertEqual(list(Path(self.test_dir).glob('_temp_update_*')), [])
         self.assertEqual(list(output.glob('_temp_update_*')), [])
 
+    def test_overwrite_preserves_symlink_parent_traversal(self):
+        work = Path(self.test_dir) / 'work'
+        target = Path(self.test_dir) / 'target'
+        work.mkdir()
+        (target / 'run').mkdir(parents=True)
+        (work / 'link').symlink_to(target / 'run', target_is_directory=True)
+        output = target / 'output'
+        unrelated = work / 'output'
+        output.mkdir()
+        unrelated.mkdir()
+        keep = unrelated / 'keep.dat'
+        keep.write_text('unrelated output')
+
+        for relative in (False, True):
+            with self.subTest(relative=relative):
+                old = output / 'old.dat'
+                old.write_text('old intended output')
+                prefix = os.path.relpath(work) if relative else str(work)
+                requested = os.path.join(prefix, 'link', '..', 'output') + os.sep
+
+                _generate_update_data_local(
+                    self._make_args(overwrite=True), requested,
+                    1, 2, Path(self.mock_dsdgen))
+
+                self.assertEqual(keep.read_text(), 'unrelated output')
+                self.assertFalse(old.exists())
+                self.assertEqual(
+                    'delete update=1', (output / 'delete' / 'delete_1.dat').read_text())
+                self.assertEqual(list(target.glob('_temp_update_*')), [])
+                self.assertEqual(list(work.glob('_temp_update_*')), [])
+
     @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0,
                      'root bypasses directory write permissions')
     def test_non_overwrite_with_read_only_parent(self):
