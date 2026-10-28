@@ -71,6 +71,9 @@ def report(root, manifest, results, state, error=None):
                    corpus_count=manifest["corpus_count"], selected=len(manifest["selected"]),
                    attempted=len(results), remaining=len(manifest["selected"]) - len(results),
                    status_counts=dict(counts),
+                   capture_counts=dict(collections.Counter(
+                       "complete" if r.get("capture") else r.get("capture_status", "not_collected")
+                       for r in results.values())),
                    categories=dict(collections.Counter(query_category(r) for r in results.values())),
                    elapsed_seconds=time.time() - manifest["started_epoch"], error=error)
     atomic_json(root / "summary.json", summary)
@@ -101,6 +104,10 @@ def main(argv=None):
     parser.add_argument("--query-timeout", type=int, default=30)
     parser.add_argument("--startup-timeout", type=int, default=180)
     parser.add_argument("--expected-spark-version", help="Fail startup if the observed Spark version differs")
+    parser.add_argument("--collect-results", action="store_true",
+                        help="Retain bounded complete typed results when possible; drain a native execution after overflow")
+    parser.add_argument("--max-rows", type=int, default=100000)
+    parser.add_argument("--capture-mib", type=int, default=32)
     parser.add_argument("--campaign-hours", type=float, default=72)
     parser.add_argument("--cores", type=int, default=4)
     parser.add_argument("--driver-memory", choices=("4g", "8g"), default="4g")
@@ -108,13 +115,16 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not (1 <= args.batch_size <= 100 and 1 <= args.query_timeout <= 120
             and 60 <= args.batch_seconds <= 3600 and 0 < args.campaign_hours <= 120
-            and 1 <= args.cores <= 4 and args.gpu.isdecimal()):
+            and 1 <= args.cores <= 4 and args.gpu.isdecimal()
+            and 1 <= args.max_rows <= 100000 and 1 <= args.capture_mib <= 32):
         parser.error("Execution/resource bounds exceeded")
     for name in ("bundle", "data", "spark_home", "plugin_jar", "python", "output"):
         setattr(args, name, getattr(args, name).resolve())
     bundle, corpus, selected = load_bundle(args.bundle, args.select.split(",") if args.select else None)
     args.tables = TABLES if bundle["dataset"] == "nds" else NDS_H_TABLES
-    args.max_rows, args.capture_mib, args.execution_only = 1, 1, True
+    args.execution_only = not args.collect_results
+    args.full_scan_after_capture_limit = args.collect_results
+    args.record_plan = False
     identity = dataset_identity(args.data, 4096 * 1024 ** 2, args.tables)
     if args.engine == "gpu":
         free = subprocess.check_output(["nvidia-smi", "--query-gpu=memory.free",
@@ -137,6 +147,7 @@ def main(argv=None):
                     upstream_revision=bundle["upstream_revision"], corpus_count=len(corpus),
                     selected=selected, engine=args.engine, started_epoch=began,
                     adaptation=bundle.get("adaptation"),
+                    collect_results=args.collect_results,
                     query_sha256={qid: digest(frozen / "queries" / (qid + ".sql")) for qid in selected},
                     started_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     pid=os.getpid(), host=socket.gethostname(), data=identity,

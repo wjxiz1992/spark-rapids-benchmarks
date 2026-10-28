@@ -86,6 +86,24 @@ Use `--expected-spark-version 4.0.4` to verify the observed runtime. An adapted
 execution success is still not a CPU/GPU correctness verdict or rewrite proof;
 those comparisons are separate and never inferred from execution status.
 
+`--collect-results` saves complete typed results up to 100,000 rows / 32 MiB
+per query. If capture overflows, a native RDD drain still tests complete query
+execution, and the record explicitly says `capture_status=capture_limit`.
+Partial rows never become an oracle. CPU discovery is explicitly selected with
+`--engine cpu`; no CPU run is launched by a GPU sweep. Compare independently
+saved CPU/GPU captures with:
+
+```bash
+python3 -m sqlstorm.compare_sweeps --cpu /runs/cpu-nds --gpu /runs/gpu-nds \
+  --output /reports/nds-comparison.json
+```
+
+The comparison verifies identical data, SQL hashes and SQL configuration.
+Execution failures and missing/overflowed captures remain not validated.
+This compares Spark CPU/GPU on adapted SQL; source/adapted semantic validation
+remains a separate `sqlstorm.verify` result. Discovery captures do not replace
+the reviewed production CPU reference used by the weekly smoke jobs.
+
 The separate `sqlstorm.sweep` entry point executes the complete pinned NDS
 (15,242 queries) or NDS-H (17,036 queries) collection in bounded batches. It
 preserves original SQL, including queries marked for review, and performs no

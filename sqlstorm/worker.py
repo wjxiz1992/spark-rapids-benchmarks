@@ -133,6 +133,20 @@ def main():
             except CaptureLimit as exc:
                 spark.sparkContext.cancelJobGroup(attempt)
                 result.update(status="capture_limit", error=str(exc))
+                if job.get("full_scan_after_capture_limit"):
+                    # Keep the complete execution test even when a bounded
+                    # correctness capture overflows. Never expose partial rows
+                    # as a complete oracle. Counting the planned RDD retains
+                    # SELECT expressions, unlike a logical df.count().
+                    spark.sparkContext.setJobGroup(attempt + "-drain", "SQLStorm complete execution", interruptOnCancel=True)
+                    try:
+                        total = df._jdf.queryExecution().toRdd().count()
+                        result.update(status="ok", row_count=total, capture_status="capture_limit",
+                                      captured_rows=count, capture_bytes=size,
+                                      result_mode="execution_only_after_capture_limit",
+                                      sink="query_execution_internal_row_rdd_count")
+                    except Exception as drain_error:
+                        result.update(status="error", **error_record(drain_error))
             except Exception as exc:
                 result.update(error_record(exc))
             result["elapsed_seconds"] = time.monotonic() - started
@@ -140,7 +154,7 @@ def main():
                 result.update(status="timeout", error="Query exceeded deadline including capture")
             event(journal, result)
             spark.sparkContext.setLocalProperty("spark.jobGroup.id", None)
-            if job.get("execution_only") and any(token in result.get("error", "") for token in
+            if (job.get("execution_only") or job.get("full_scan_after_capture_limit")) and any(token in result.get("error", "") for token in
                     ("CUDA_ERROR", "CudaException", "FatalRuntimeException", "Connection refused",
                      "SparkContext has been shutdown", "SparkContext has been stopped")):
                 # Start a fresh application after failures that can poison the

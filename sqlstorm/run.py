@@ -97,6 +97,7 @@ def execute_engine(args, root, selected, engine, deadline):
             job = dict(output=str(root), engine=engine, data=str(args.data),
                        tables=getattr(args, "tables", TABLES),
                        execution_only=getattr(args, "execution_only", False),
+                       full_scan_after_capture_limit=getattr(args, "full_scan_after_capture_limit", False),
                        record_plan=getattr(args, "record_plan", True),
                        expected_spark_version=getattr(args, "expected_spark_version", None),
                        queries=jobs, max_rows=args.max_rows, capture_bytes=args.capture_mib * 1024 ** 2,

@@ -81,16 +81,16 @@ def scalar(value, dtype):
     raise TypeError("Unsupported result type: " + str(dtype))
 
 
-def compare_results(cpu, gpu, folder):
+def compare_results(cpu, gpu, folder, gpu_folder=None):
     """Compare verified complete captures, never just their hashes or row counts."""
     base = {"policy": POLICY, "cpu_attempt": cpu.get("attempt_id"),
             "gpu_attempt": gpu.get("attempt_id")}
     if cpu.get("status") != "ok" or gpu.get("status") != "ok":
         return dict(base, status="not_validated", reason="execution_or_capture_incomplete")
     captures = []
-    for item in (cpu, gpu):
-        path = (Path(folder) / item["capture"]).resolve()
-        if not path.is_relative_to(Path(folder).resolve()):
+    for item, base_folder in zip((cpu, gpu), (folder, gpu_folder if gpu_folder is not None else folder)):
+        path = (Path(base_folder) / item["capture"]).resolve()
+        if not path.is_relative_to(Path(base_folder).resolve()):
             raise ValueError("Capture escaped campaign")
         if not path.is_file() or digest(path) != item["capture_sha256"]:
             return dict(base, status="not_validated", reason="capture_integrity")
