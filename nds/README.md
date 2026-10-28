@@ -126,8 +126,9 @@ optional arguments:
                       generated in one run. Format: "start,end", both are inclusive. e.g. "1,100". Note:
                       the child range must be within the "parallel", "--parallel 100 --range 100,200" is
                       illegal.
-  --overwrite_output  allow replacing existing output. In local --update mode, replace matching
-                      generated filenames only; keep other files for incremental --range generation.
+  --overwrite_output  allow replacing existing output. In local --update mode, replace the entire
+                      output directory after generation succeeds, including earlier child ranges
+                      when --range is used.
   --replication REPLICATION
                       the number of replication factor when generating data to HDFS. if not set, the Hadoop job will use the setting in the Hadoop cluster.
   --update UPDATE     generate update dataset <n>. <n> is identical to the number of streams used in the Throughput Tests of the benchmark
@@ -139,21 +140,19 @@ Example command:
 python nds_gen_data.py hdfs 100 100 /data/raw_sf100 --overwrite_output
 ```
 
-For local update generation, `--overwrite_output` replaces only filenames produced
-by the selected child range, including the shared `delete_<update>.dat` and
-`inventory_delete_<update>.dat` files. It does not clear the output directory:
-files from earlier ranges and differently named files remain. Keep the same
-`parallel` value when generating a dataset in multiple ranges:
+For local update generation, `--overwrite_output` replaces the entire output
+directory after all generator processes succeed. This removes differently named
+files, other table directories, and earlier child ranges. If generation fails,
+the existing output remains unchanged. For example:
 
 ```bash
 python nds_gen_data.py local 10 4 /data/refresh_1 --update 1 --range 1,2
 python nds_gen_data.py local 10 4 /data/refresh_1 --update 1 --range 3,4 --overwrite_output
 ```
 
-These commands retain the regular-table files from children 1 and 2 while adding
-children 3 and 4, and replace the shared delete files. Use a separate empty output
-directory for a fresh dataset, especially when changing the scale, update number,
-or parallel count, so differently named files from an older dataset cannot mix in.
+The second command replaces the first command's output with children 3 and 4
+and one copy of each shared delete file. To keep outputs from multiple ranges,
+generate each range into a separate directory.
 
 ### Convert CSV to Parquet or Other data sources
 

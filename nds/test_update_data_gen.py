@@ -257,8 +257,34 @@ class TestGenerateUpdateDataLocal(unittest.TestCase):
 
         files = os.listdir(os.path.join(self.data_dir, 's_catalog_order'))
         self.assertIn('s_catalog_order_1_2.dat', files)
-        # Overwrite replaces matching generated names, not the entire directory.
-        self.assertIn('old.dat', files)
+        self.assertNotIn('old.dat', files)
+
+    def test_overwrite_removes_other_tables_and_files(self):
+        output = Path(self.data_dir)
+        (output / 'customer').mkdir(parents=True)
+        (output / 'customer' / 'old.dat').write_text('old base data')
+        (output / '.old-metadata').write_text('old metadata')
+
+        _generate_update_data_local(
+            self._make_args(overwrite=True), self.data_dir, 1, 2, Path(self.mock_dsdgen))
+
+        self.assertFalse((output / 'customer').exists())
+        self.assertFalse((output / '.old-metadata').exists())
+        self.assertTrue((output / 'delete' / 'delete_1.dat').is_file())
+
+    def test_failed_generation_preserves_existing_output(self):
+        output = Path(self.data_dir)
+        output.mkdir()
+        existing = output / 'old.dat'
+        existing.write_text('existing data')
+        Path(self.mock_dsdgen).write_text('#!/usr/bin/env python3\nraise SystemExit(1)\n')
+
+        with self.assertRaisesRegex(Exception, 'dsdgen failed'):
+            _generate_update_data_local(
+                self._make_args(overwrite=True), self.data_dir, 1, 2, Path(self.mock_dsdgen))
+
+        self.assertEqual(existing.read_text(), 'existing data')
+        self.assertEqual(list(Path(self.test_dir).glob('_temp_update_*')), [])
 
     def test_no_force_flag_passed_to_dsdgen(self):
         """Verify dsdgen is never called with -force (the whole point of this redesign)."""
@@ -289,8 +315,8 @@ class TestGenerateUpdateDataLocal(unittest.TestCase):
         tool_path = Path(self.mock_dsdgen)
         _generate_update_data_local(args, self.data_dir, 1, 2, tool_path)
 
-    def test_incremental_range_preserves_previous_data(self):
-        """Simulate two --range invocations."""
+    def test_range_with_overwrite_replaces_previous_data(self):
+        """Explicit overwrite starts fresh even when only a child range is generated."""
         args = self._make_args()
         args.parallel = '4'
         tool_path = Path(self.mock_dsdgen)
@@ -309,8 +335,8 @@ class TestGenerateUpdateDataLocal(unittest.TestCase):
 
         cat_order_dir = os.path.join(self.data_dir, 's_catalog_order')
         files = sorted(os.listdir(cat_order_dir))
-        self.assertIn('s_catalog_order_1_4.dat', files)
-        self.assertIn('s_catalog_order_2_4.dat', files)
+        self.assertNotIn('s_catalog_order_1_4.dat', files)
+        self.assertNotIn('s_catalog_order_2_4.dat', files)
         self.assertIn('s_catalog_order_3_4.dat', files)
         self.assertIn('s_catalog_order_4_4.dat', files)
 

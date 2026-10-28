@@ -34,6 +34,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import tempfile
 
 from check import check_build, check_version, get_abs_path, get_dir_size, parallel_value_type, valid_range
 
@@ -156,10 +157,13 @@ def _merge_update_data_local(temp_base, data_dir, range_start, range_end,
     so only the first child's copy is kept — consistent with the HDFS approach
     in move_delete_date_tables().
 
-    overwrite_output replaces matching generated filenames, including delete
-    files. Other files remain so separate --range invocations can accumulate
-    their output in the same directory.
+    overwrite_output replaces the entire output directory, including differently
+    named files and output from earlier child ranges. Generation finishes in a
+    separate temporary directory before existing output is removed.
     """
+    if overwrite_output:
+        shutil.rmtree(data_dir)
+        os.makedirs(data_dir)
     delete_tables = {'delete', 'inventory_delete'}
     for table in maintenance_table_names:
         target_dir = os.path.join(data_dir, table)
@@ -196,9 +200,9 @@ def _generate_update_data_local(args, data_dir, range_start, range_end, tool_pat
     This eliminates the need for dsdgen's -force flag and prevents silent overwrites,
     consistent with the HDFS approach in generate_data_hdfs().
 
-    With --overwrite_output, generated files replace matching output filenames;
-    the output directory is not cleared. Earlier child ranges and unrelated
-    files are retained. Use a separate empty directory for a fresh dataset.
+    With --overwrite_output, successful generation replaces the entire output
+    directory. This also removes earlier child ranges when --range is used.
+    A failed dsdgen run leaves the existing output unchanged.
 
     Raises:
         Exception: if update data already exists and --overwrite_output is not set
@@ -213,10 +217,8 @@ def _generate_update_data_local(args, data_dir, range_start, range_end, tool_pat
             "Update data already exists in directory {} for tables: {}. "
             "Use '--overwrite_output' to overwrite.".format(data_dir, existing))
 
-    temp_base = os.path.join(data_dir, '_temp_update')
-    if os.path.exists(temp_base):
-        print("Warning: removing stale temp directory from a previous run: {}".format(temp_base))
-        shutil.rmtree(temp_base)
+    # Keep staging outside the output so replacing output cannot remove new data.
+    temp_base = tempfile.mkdtemp(prefix='_temp_update_', dir=os.path.dirname(data_dir))
 
     work_dir = tool_path.parent
     procs = []
@@ -403,8 +405,8 @@ if __name__ == "__main__":
     parser.add_argument("--overwrite_output",
                         action="store_true",
                         help="allow replacing existing output. In local --update mode, replace " +
-                        "matching generated filenames only; keep other files for incremental " +
-                        "--range generation.")
+                        "the entire output directory after generation succeeds, including " +
+                        "earlier child ranges when --range is used.")
     parser.add_argument("--replication",
                         help="the number of replication factor when generating data to HDFS. " +
                         "if not set, the Hadoop job will use the setting in the Hadoop cluster.")
