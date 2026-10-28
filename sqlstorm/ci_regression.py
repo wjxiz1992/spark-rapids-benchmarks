@@ -36,7 +36,7 @@ def main():
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--mode", choices=("cpu-baseline", "gpu-regression"), required=True)
     parser.add_argument("--plugin-jar", type=Path)
-    parser.add_argument("--python", default="/usr/bin/python3")
+    parser.add_argument("--python", required=True, help="Target interpreter matching the staged dependency wheels")
     parser.add_argument("--java-home", default="/usr/lib/jvm/java-17-openjdk-amd64")
     parser.add_argument("--budget", type=int, default=1200)
     args = parser.parse_args()

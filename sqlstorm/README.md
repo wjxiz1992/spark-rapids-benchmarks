@@ -19,7 +19,8 @@ in the bundle. These are small scheduled smoke sets, not full-corpus coverage.
 NDS-H queries 6 and 17 exceed the complete-result smoke row bound on SF1 and
 remain larger-output campaign candidates; they are not passing smoke cases.
 
-Install the pinned adapter/reference dependencies, freeze the original corpus,
+Use Python 3.11+ for the pinned DuckDB reference engine. Install the pinned
+adapter/reference dependencies, freeze the original corpus,
 then build a selected adapted bundle:
 
 ```bash
@@ -31,11 +32,11 @@ python3 -m sqlstorm.adapt --bundle /new/original-bundle --output /new/bundle \
 python3 -m sqlstorm.verify --bundle /new/bundle --data /data/nds-sf1 --capture-mib 32
 python3 -m sqlstorm.regression --mode cpu-baseline --bundle /new/bundle \
   --data /data/nds-sf1 --baseline /saved/nds-spark404-v1 \
-  --spark-home /path/to/spark-4.0.4 --python /path/to/python3.10 \
+  --spark-home /path/to/spark-4.0.4 --python /path/to/python3.11 \
   --output /new/cpu-run --capture-mib 32
 python3 -m sqlstorm.regression --mode gpu-regression --bundle /new/bundle \
   --data /data/nds-sf1 --baseline /saved/nds-spark404-v1 \
-  --spark-home /path/to/spark-4.0.4 --python /path/to/python3.10 \
+  --spark-home /path/to/spark-4.0.4 --python /path/to/python3.11 \
   --plugin-jar /path/to/scala-2.13-plugin.jar --output /new/gpu-run --capture-mib 32
 ```
 
@@ -65,7 +66,8 @@ cache variance, rather than a controlled performance benchmark or a 3 TB NDS
 performance claim. No speedup threshold is enforced initially.
 
 The Blossom `raplab/Jenkinsfile.sqlstorm-regression` uses `ci_regression.py` to
-stage the same code and dependencies on u13. CPU mode performs verification
+stage the same code and Python 3.11 wheels on u13, using a dedicated portable
+Python 3.11 runtime without changing the system interpreter. CPU mode performs verification
 and baseline creation once. GPU mode stages only the GPU candidate and reads
 the explicit reference. The job holds `SPARK2A_CLUSTER`, records the runner
 revision and plugin URL/hash, and archives complete evidence. Weekly GPU-only
