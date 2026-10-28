@@ -1,4 +1,78 @@
-# SQLStorm Spark correctness pilot
+# SQLStorm Spark correctness regression
+
+## Saved CPU baseline and GPU-only regression
+
+`sqlstorm.regression` has two explicit modes: manually run `cpu-baseline` once
+to save complete typed results, schemas and query times; subsequently run
+`gpu-regression` against that saved directory. GPU mode never launches CPU or
+rebuilds a missing/stale reference. The baseline is immutable. Changing SQL,
+data files, SQL configuration, Spark version or CPU resource settings requires
+an explicitly selected new reference. Empty results are valid comparisons.
+There is no GPU operator coverage gate.
+
+The initial `suites/nds-smoke.json` and `suites/nds-h-smoke.json` contain 12
+queries each, using Spark 4.0.4 and SF1 Parquet. They include unchanged queries
+and conservative adaptations: redundant nonrecursive `RECURSIVE`, literal
+FETCH/OFFSET syntax, and unsized VARCHAR/TEXT casts. Original SQL bytes, MIT
+license, original corpus cardinality and both executable/source hashes remain
+in the bundle. These are small scheduled smoke sets, not full-corpus coverage.
+NDS-H queries 6 and 17 exceed the complete-result smoke row bound on SF1 and
+remain larger-output campaign candidates; they are not passing smoke cases.
+
+Install the pinned adapter/reference dependencies, freeze the original corpus,
+then build a selected adapted bundle:
+
+```bash
+python3 -m pip install -r sqlstorm/requirements.txt
+python3 -m sqlstorm.bundle --source /path/to/SQLStorm --dataset nds \
+  --all --output /new/original-bundle
+python3 -m sqlstorm.adapt --bundle /new/original-bundle --output /new/bundle \
+  --select 16,30,37,47,109,2093,3109,6191,928,9141,26859,21689
+python3 -m sqlstorm.verify --bundle /new/bundle --data /data/nds-sf1 --capture-mib 32
+python3 -m sqlstorm.regression --mode cpu-baseline --bundle /new/bundle \
+  --data /data/nds-sf1 --baseline /saved/nds-spark404-v1 \
+  --spark-home /path/to/spark-4.0.4 --python /path/to/python3.10 \
+  --output /new/cpu-run --capture-mib 32
+python3 -m sqlstorm.regression --mode gpu-regression --bundle /new/bundle \
+  --data /data/nds-sf1 --baseline /saved/nds-spark404-v1 \
+  --spark-home /path/to/spark-4.0.4 --python /path/to/python3.10 \
+  --plugin-jar /path/to/scala-2.13-plugin.jar --output /new/gpu-run --capture-mib 32
+```
+
+`verify` is a one-time source/adapted result comparison in DuckDB on the same
+input, including logical schemas, duplicate rows and exact values. Unchanged
+SQL is recorded as byte identity. Its proof is required before creating an
+adapted CPU baseline. This checks the rewrite on that fixed input, not general
+SQL equivalence across engines or data. GPU runs reuse the saved proof without
+executing reference SQL. True recursive CTEs, unordered string aggregation and
+CHAR-width semantics have no automatic rewrite; ordering review remains in
+suite metadata. The adapter preserves nontarget bytes rather than regenerating
+the entire SQL through a transpiler.
+
+Each regression is bounded to 4 CPU cores, a 4 GiB driver heap (8 GiB optional),
+30% GPU pool, 100,000 complete result rows and at most 32 MiB per capture.
+The default is 60 seconds per query and 1,200 seconds per Spark run. Exceeding
+a capture budget cannot pass; results are never sampled or truncated to match.
+The runner preserves exact typed multisets, schemas, journals, logs and JUnit.
+Exit 0 means every selected query matched (or every CPU baseline query
+succeeded); 1 means completed execution/comparison failed; 2 means incomplete.
+A CPU reference is published only after all selected queries succeed.
+
+Speedup is saved CPU query time / current GPU query time. Both include SQL
+planning and complete result retrieval, excluding measured Python encoding and
+capture-file writing. This is a historical SF1 diagnostic, with single-run and
+cache variance, rather than a controlled performance benchmark or a 3 TB NDS
+performance claim. No speedup threshold is enforced initially.
+
+The Blossom `raplab/Jenkinsfile.sqlstorm-regression` uses `ci_regression.py` to
+stage the same code and dependencies on u13. CPU mode performs verification
+and baseline creation once. GPU mode stages only the GPU candidate and reads
+the explicit reference. The job holds `SPARK2A_CLUSTER`, records the runner
+revision and plugin URL/hash, and archives complete evidence. Weekly GPU-only
+smoke can be enabled after a successful baseline and GPU validation run.
+Neither the existing distributed NDS job nor its 3 TB data is modified.
+
+## Other diagnostic entry points
 
 ## GPU execution sweep
 

@@ -97,6 +97,8 @@ def execute_engine(args, root, selected, engine, deadline):
             job = dict(output=str(root), engine=engine, data=str(args.data),
                        tables=getattr(args, "tables", TABLES),
                        execution_only=getattr(args, "execution_only", False),
+                       record_plan=getattr(args, "record_plan", True),
+                       expected_spark_version=getattr(args, "expected_spark_version", None),
                        queries=jobs, max_rows=args.max_rows, capture_bytes=args.capture_mib * 1024 ** 2,
                        query_timeout=args.query_timeout, sql_configuration=list(SQL_CONF))
             job_path = root / (engine + "-job-" + str(launches) + ".json")
@@ -121,7 +123,8 @@ def execute_engine(args, root, selected, engine, deadline):
                 command += ["--conf", "spark.plugins=", "--conf", "spark.rapids.sql.enabled=false"]
             command += [str(root / "inputs/source/worker.py"), "--job", str(job_path)]
             env = dict(os.environ, PYSPARK_PYTHON=str(args.python), PYSPARK_DRIVER_PYTHON=str(args.python),
-                       SPARK_LOCAL_IP="127.0.0.1", TZ="UTC", CUDA_VISIBLE_DEVICES=args.gpu)
+                       SPARK_HOME=str(args.spark_home), SPARK_LOCAL_IP="127.0.0.1",
+                       TZ="UTC", CUDA_VISIBLE_DEVICES=args.gpu)
             # Inherited submit arguments must not inject RAPIDS into the CPU reference.
             env.pop("PYSPARK_SUBMIT_ARGS", None)
             launch_time = time.monotonic()

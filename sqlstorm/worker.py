@@ -67,6 +67,8 @@ def main():
     enabled = spark.conf.get("spark.rapids.sql.enabled", "false").lower() == "true"
     if enabled != (job["engine"] == "gpu"):
         raise RuntimeError("Observed RAPIDS setting differs from requested engine")
+    if job.get("expected_spark_version") and spark.version != job["expected_spark_version"]:
+        raise RuntimeError("Spark version differs from the selected CPU baseline")
     tables = []
     for table in job["tables"]:
         frame = spark.read.parquet(str(Path(job["data"]) / table))
@@ -99,9 +101,10 @@ def main():
                     event(journal, result)
                     spark.sparkContext.setLocalProperty("spark.jobGroup.id", None)
                     continue
-                count, size = 0, 0
+                count, size, capture_seconds = 0, 0, 0.0
                 with capture.open("x", encoding="utf-8") as out:
                     for row in df.toLocalIterator(prefetchPartitions=False):
+                        encoding_started = time.monotonic()
                         value = encoded([scalar(row[i], field["type"])
                                          for i, field in enumerate(schema["fields"])]) + "\n"
                         size += len(value.encode("utf-8"))
@@ -109,16 +112,24 @@ def main():
                             raise CaptureLimit("Complete result exceeded capture budget")
                         out.write(value)
                         count += 1
+                        capture_seconds += time.monotonic() - encoding_started
+                    encoding_started = time.monotonic()
                     out.flush()
                     os.fsync(out.fileno())
-                evidence = plan_evidence(df)
-                plan_file = root / "plans" / (job["engine"] + "-" + attempt + ".json")
-                atomic_json(plan_file, evidence)
+                    capture_seconds += time.monotonic() - encoding_started
+                query_seconds = time.monotonic() - started - capture_seconds
                 result.update(status="ok", schema=schema, row_count=count,
                               capture=str(capture.relative_to(root)), capture_bytes=size,
-                              capture_sha256=digest(capture), plan=str(plan_file.relative_to(root)),
-                              gpu_operators=evidence["gpu_operators"],
-                              gpu_active_operators=evidence["gpu_active_operators"])
+                              capture_sha256=digest(capture), query_seconds=query_seconds,
+                              capture_seconds=capture_seconds,
+                              timing_policy="planning_and_result_retrieval_excluding_capture_io_v1")
+                if job.get("record_plan", True):
+                    evidence = plan_evidence(df)
+                    plan_file = root / "plans" / (job["engine"] + "-" + attempt + ".json")
+                    atomic_json(plan_file, evidence)
+                    result.update(plan=str(plan_file.relative_to(root)),
+                                  gpu_operators=evidence["gpu_operators"],
+                                  gpu_active_operators=evidence["gpu_active_operators"])
             except CaptureLimit as exc:
                 spark.sparkContext.cancelJobGroup(attempt)
                 result.update(status="capture_limit", error=str(exc))
