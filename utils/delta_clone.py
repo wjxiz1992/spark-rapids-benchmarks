@@ -17,17 +17,14 @@ def new_run_session(spark_session, spark_properties):
     then apply the property file. Warn about immutable settings instead of
     trying to reset startup values that Spark may have normalized.
     """
-    try:
-        from pyspark.sql.connect.session import SparkSession as ConnectSparkSession
-    except ImportError:
-        # Classic Spark does not require the optional Connect client dependencies.
-        pass
-    else:
-        if isinstance(spark_session, ConnectSparkSession):
-            raise ValueError(
-                "Delta shallow-clone runs require a classic Spark session: "
-                "Spark Connect does not support newSession() isolation. "
-                "Use spark-submit without --spark_connect or SPARK_REMOTE.")
+    # Inspect already-loaded classes so classic Spark never imports optional
+    # Connect dependencies. Include base classes to recognize Connect subclasses.
+    if any(cls.__module__ == 'pyspark.sql.connect.session'
+           for cls in type(spark_session).__mro__):
+        raise ValueError(
+            "Delta shallow-clone runs require a classic Spark session: "
+            "Spark Connect does not support newSession() isolation. "
+            "Use spark-submit without --spark_connect or SPARK_REMOTE.")
 
     # PySpark's RuntimeConfig.getAll is only available starting in Spark 4.0.
     settings = {}

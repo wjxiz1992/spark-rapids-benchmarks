@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for run-scoped managed Delta shallow clones."""
 
+import builtins
 from pathlib import Path
 import sys
 import unittest
@@ -12,21 +13,43 @@ from delta_clone import DeltaCloneScope, new_run_session
 
 
 class DeltaCloneScopeTest(unittest.TestCase):
+    def test_classic_session_does_not_import_optional_connect_dependencies(self):
+        spark = Mock()
+        entries = spark._jsparkSession.conf.return_value.getAll.return_value.iterator.return_value
+        entries.hasNext.return_value = False
+        original_import = builtins.__import__
+
+        def import_without_connect(name, *args, **kwargs):
+            if name.startswith('pyspark.sql.connect'):
+                raise ValueError('numpy.dtype size changed')
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=import_without_connect):
+            run_session = new_run_session(spark, {})
+
+        self.assertIs(run_session, spark.newSession.return_value)
+        spark.newSession.assert_called_once_with()
+
     def test_connect_is_rejected_before_creating_clones(self):
         try:
             from pyspark.sql.connect.session import SparkSession as ConnectSparkSession
         except ImportError:
             self.skipTest('Spark Connect client dependencies are not installed')
 
-        # Construct a real Connect client without starting or contacting a server.
-        spark = ConnectSparkSession('sc://localhost:1')
-        try:
-            with patch.object(spark, 'sql') as sql:
-                with self.assertRaisesRegex(ValueError, 'require a classic Spark session'):
-                    new_run_session(spark, {})
-                sql.assert_not_called()
-        finally:
-            spark.client.close()
+        class CustomConnectSparkSession(ConnectSparkSession):
+            pass
+
+        # Construct real Connect clients without starting or contacting a server.
+        for session_type in (ConnectSparkSession, CustomConnectSparkSession):
+            with self.subTest(session_type=session_type):
+                spark = session_type('sc://localhost:1')
+                try:
+                    with patch.object(spark, 'sql') as sql:
+                        with self.assertRaisesRegex(ValueError, 'require a classic Spark session'):
+                            new_run_session(spark, {})
+                        sql.assert_not_called()
+                finally:
+                    spark.client.close()
 
     @patch('delta_clone.uuid.uuid4')
     def test_clone_uses_unique_managed_database_and_quoted_source_path(self, uuid4):
