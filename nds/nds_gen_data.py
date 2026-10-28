@@ -208,6 +208,7 @@ def _generate_update_data_local(args, data_dir, range_start, range_end, tool_pat
         Exception: if update data already exists and --overwrite_output is not set
         Exception: if dsdgen fails
     """
+    data_dir = os.path.abspath(data_dir)
     if not os.path.isdir(data_dir):
         os.makedirs(data_dir)
 
@@ -217,8 +218,9 @@ def _generate_update_data_local(args, data_dir, range_start, range_end, tool_pat
             "Update data already exists in directory {} for tables: {}. "
             "Use '--overwrite_output' to overwrite.".format(data_dir, existing))
 
-    # Keep staging outside the output so replacing output cannot remove new data.
-    temp_base = tempfile.mkdtemp(prefix='_temp_update_', dir=os.path.dirname(data_dir))
+    # Only overwrite removes output. Otherwise staging needs no parent write access.
+    staging_dir = os.path.dirname(data_dir) if args.overwrite_output else data_dir
+    temp_base = tempfile.mkdtemp(prefix='_temp_update_', dir=staging_dir)
 
     work_dir = tool_path.parent
     procs = []

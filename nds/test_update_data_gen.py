@@ -272,6 +272,44 @@ class TestGenerateUpdateDataLocal(unittest.TestCase):
         self.assertFalse((output / '.old-metadata').exists())
         self.assertTrue((output / 'delete' / 'delete_1.dat').is_file())
 
+    def test_overwrite_with_trailing_slash_preserves_generated_data(self):
+        output = Path(self.data_dir)
+        output.mkdir()
+        (output / 'old.dat').write_text('old data')
+
+        _generate_update_data_local(
+            self._make_args(overwrite=True), self.data_dir + '/',
+            1, 2, Path(self.mock_dsdgen))
+
+        self.assertFalse((output / 'old.dat').exists())
+        self.assertEqual(
+            's_catalog_order child=1 scale=10',
+            (output / 's_catalog_order' / 's_catalog_order_1_2.dat').read_text())
+        self.assertEqual(
+            'delete update=1', (output / 'delete' / 'delete_1.dat').read_text())
+        self.assertEqual(list(Path(self.test_dir).glob('_temp_update_*')), [])
+        self.assertEqual(list(output.glob('_temp_update_*')), [])
+
+    @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0,
+                     'root bypasses directory write permissions')
+    def test_non_overwrite_with_read_only_parent(self):
+        output = Path(self.data_dir)
+        output.mkdir()
+        (output / 'keep.dat').write_text('existing unrelated data')
+        parent_mode = stat.S_IMODE(os.stat(self.test_dir).st_mode)
+        os.chmod(self.test_dir, 0o555)
+        try:
+            _generate_update_data_local(
+                self._make_args(), self.data_dir, 1, 2, Path(self.mock_dsdgen))
+        finally:
+            os.chmod(self.test_dir, parent_mode)
+
+        self.assertEqual('existing unrelated data', (output / 'keep.dat').read_text())
+        self.assertEqual(
+            's_catalog_order child=1 scale=10',
+            (output / 's_catalog_order' / 's_catalog_order_1_2.dat').read_text())
+        self.assertEqual(list(output.glob('_temp_update_*')), [])
+
     def test_failed_generation_preserves_existing_output(self):
         output = Path(self.data_dir)
         output.mkdir()
