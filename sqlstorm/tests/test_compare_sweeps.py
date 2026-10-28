@@ -6,11 +6,17 @@ import tempfile
 import unittest
 
 from sqlstorm.common import atomic_json, digest
-from sqlstorm.compare_sweeps import compare
+from sqlstorm.compare_sweeps import compare, records
 from sqlstorm.compare_sweeps import order_review
 
 
 class Sweeps(unittest.TestCase):
+    def test_progress_reader_ignores_an_in_flight_journal_tail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "results.jsonl").write_text('{"id":"1"}\n{"id":')
+            self.assertEqual({"1": {"id": "1"}}, records(root))
+
     def test_ordered_output_difference_requires_review_instead_of_a_multiset_pass(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

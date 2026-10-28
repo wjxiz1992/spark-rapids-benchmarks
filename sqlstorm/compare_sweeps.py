@@ -31,7 +31,8 @@ def order_review(cpu_capture, gpu_capture, sql_path, sql_hash):
 
 def records(root):
     path = root / "results.jsonl"
-    values = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    values = [json.loads(line) for line in path.read_text().splitlines(keepends=True)
+              if line.endswith("\n")] if path.exists() else []
     indexed = {r["id"]: r for r in values}
     if len(indexed) != len(values):
         raise ValueError("Duplicate terminal query records")
