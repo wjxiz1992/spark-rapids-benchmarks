@@ -44,9 +44,15 @@ def compare(cpu, gpu):
     cm, gm = [json.loads((p / "manifest.json").read_text()) for p in (cpu, gpu)]
     if cm["engine"] != "cpu" or gm["engine"] != "gpu":
         raise ValueError("A CPU oracle and a GPU candidate are required")
-    for key in ("dataset", "upstream_revision", "selected", "data", "query_sha256", "sql_configuration"):
+    for key in ("dataset", "upstream_revision", "selected", "query_sha256", "sql_configuration"):
         if cm[key] != gm[key]:
             raise ValueError("CPU/GPU discovery inputs differ: " + key)
+    # Physical mount points may differ between CPU and GPU hosts. Retain every
+    # content identity field, including relative paths, sizes and SHA-256 hashes.
+    def content(identity):
+        return {k: v for k, v in identity.items() if k != "root"} if isinstance(identity, dict) else identity
+    if content(cm["data"]) != content(gm["data"]):
+        raise ValueError("CPU/GPU discovery inputs differ: data")
     cr, gr = records(cpu), records(gpu)
     values = []
     for qid in cm["selected"]:

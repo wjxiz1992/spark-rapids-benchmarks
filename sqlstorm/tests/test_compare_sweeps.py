@@ -41,6 +41,19 @@ class Sweeps(unittest.TestCase):
                               capture="captures/1.jsonl", capture_sha256=digest(capture))
                 (p / "results.jsonl").write_text(json.dumps(record) + "\n")
             self.assertEqual({"match": 1}, compare(cpu, gpu)["counts"])
+            for root in (cpu, gpu):
+                m = json.loads((root / "manifest.json").read_text())
+                m["data"] = dict(root=str(root / "data"), bytes=10,
+                                 files=[dict(path="t/part.parquet", size=10, sha256="same-bytes")])
+                atomic_json(root / "manifest.json", m)
+            self.assertEqual({"match": 1}, compare(cpu, gpu)["counts"])
+            changed = json.loads((gpu / "manifest.json").read_text())
+            changed["data"]["files"][0]["sha256"] = "different-bytes"
+            atomic_json(gpu / "manifest.json", changed)
+            with self.assertRaisesRegex(ValueError, "differ: data"):
+                compare(cpu, gpu)
+            changed["data"]["files"][0]["sha256"] = "same-bytes"
+            atomic_json(gpu / "manifest.json", changed)
             capture = gpu / "batches/00001/captures/1.jsonl"
             capture.write_text('[["integer",2]]\n')
             record["capture_sha256"] = digest(capture)
