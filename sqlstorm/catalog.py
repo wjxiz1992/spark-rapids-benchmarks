@@ -92,6 +92,11 @@ def validate(root=ROOT):
             raise ValueError("Suites do not partition the dataset")
         if not selections["smoke"] <= selections["extended"]:
             raise ValueError("Smoke query has not completed GPU execution")
+        expected_smoke = {
+            query_id for query_id, entry in by_dataset[dataset].items()
+            if entry.get("smoke_validation", {}).get("comparison") == "match"}
+        if not expected_smoke or selections["smoke"] != expected_smoke:
+            raise ValueError("Smoke selection does not match saved-reference validation")
         for name in ("extended", "pending"):
             if any(by_dataset[dataset][query_id]["suite"] != name
                    for query_id in selections[name]):

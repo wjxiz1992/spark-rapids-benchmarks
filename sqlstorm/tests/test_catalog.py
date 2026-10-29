@@ -26,6 +26,8 @@ class CatalogTest(unittest.TestCase):
             source = f"v1.0/{collection}/queries/1.sql"
             data = f"SELECT '{dataset}; λ' AS label;\r\n".encode()
             entry = self.add_query(dataset, "1", source, data, data, [])
+            entry["smoke_validation"] = {
+                "campaign": "saved_reference_smoke_spark404_sf1", "comparison": "match"}
             self.entries.append(entry)
         source = "v1.0/tpcds/queries/2.sql"
         original = b"SELECT 2 FETCH FIRST 1 ROWS ONLY;\r\n"
@@ -136,6 +138,26 @@ class CatalogTest(unittest.TestCase):
     def test_duplicate_suite_selection_is_rejected(self):
         self.write_suite("nds", "extended", ["1", "1"])
         with self.assertRaisesRegex(ValueError, "Invalid suite selection"):
+            validate(self.root)
+
+    def test_empty_smoke_selection_is_rejected(self):
+        for dataset in ("nds", "nds-h"):
+            with self.subTest(dataset=dataset):
+                self.write_suite(dataset, "smoke", [])
+                with self.assertRaisesRegex(ValueError, "Smoke selection"):
+                    validate(self.root)
+                self.write_suite(dataset, "smoke", ["1"])
+
+    def test_unvalidated_smoke_substitution_is_rejected(self):
+        data = b"SELECT 3;\n"
+        self.entries.append(self.add_query(
+            "nds", "3", "v1.0/tpcds/queries/3.sql", data, data, []))
+        self.metadata["included_by_dataset"]["nds"] += 1
+        self.metadata["suites"]["nds"]["extended"] += 1
+        self.write_suite("nds", "extended", ["1", "3"])
+        self.write_suite("nds", "smoke", ["3"])
+        self.refresh_metadata()
+        with self.assertRaisesRegex(ValueError, "Smoke selection"):
             validate(self.root)
 
     def test_excluded_cpu_query_cannot_be_imported(self):
