@@ -210,6 +210,31 @@ With `--analyze_tables`, discovered file partitions are registered before
 collecting statistics, including NULL partitions. Partitioned and unpartitioned
 file-backed tables expose their input rows through the catalog.
 
+For Delta input, each run creates a unique database of catalog-managed shallow
+clones. Queries use those persistent table objects, while the source Delta tables
+remain unchanged. Cleanup attempts to drop the database and all clones when the
+run finishes or fails. Cleanup failures are logged with the database name for
+manual removal, preserving query errors and successful-run results. Each run
+uses a dedicated SQL session, so changing its current database does not affect
+another run and caller temporary views remain untouched. The Spark catalog and
+its managed table storage must be writable.
+
+On multi-node clusters, set `spark.sql.warehouse.dir` to a shared filesystem or
+object-store URI that the driver and every executor can read and write, for
+example `--conf spark.sql.warehouse.dir=hdfs:///benchmarks/delta-clones`.
+The default local `./spark-warehouse` is suitable only for local testing.
+
+These shallow-clone Delta runs require a classic Spark session. Spark Connect
+does not support the `newSession()` isolation they require; run them with
+`spark-submit` without `--spark_connect` or `SPARK_REMOTE`.
+
+The run inherits the caller's runtime settings, with `--property_file` values
+taking precedence. Settings that Spark prevents changing retain the existing
+application's values and produce a warning when they differ.
+
+Shallow clones require Delta Lake 2.3 or later; use the Delta release compatible
+with the selected Spark version.
+
 `--analyze none|table|all_columns` controls statistics collection before the
 queries. `none` is equivalent to omitting the option. `table` collects row counts
 and table size; `all_columns` also runs `COMPUTE STATISTICS FOR ALL COLUMNS`.
@@ -253,7 +278,7 @@ optional arguments:
   -h, --help            show this help message and exit
   --input_format {parquet,orc,avro,csv,json,iceberg,delta}
                         type for input data source, e.g. parquet, orc, json, csv or iceberg,
-  delta. Certain types are not fully supported by GPU reading, please refer to
+  delta. Delta paths are read through run-scoped managed shallow clones. Certain types are not fully supported by GPU reading, please refer to
   https://github.com/NVIDIA/cudf-spark/blob/main/docs/compatibility.md for more details.
   --output_prefix OUTPUT_PREFIX
                         text to prepend to every output file (e.g., "hdfs:///ds-parquet")

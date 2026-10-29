@@ -106,6 +106,7 @@ class BenchmarkStatisticsTest(unittest.TestCase):
                         settings = {'spark.sql.defaultCatalog': 'custom',
                                     'spark.sql.warehouse.dir': '/caller/warehouse'}
                         session = Mock()
+                        session._jsparkSession.conf().getAll().iterator().hasNext.return_value = False
                         session.conf.get.return_value = 'app'
                         builder = Mock()
                         builder.config.side_effect = lambda key, value: settings.update({key: value}) or builder
@@ -123,7 +124,7 @@ class BenchmarkStatisticsTest(unittest.TestCase):
                                 patch.object(driver, 'setup_tables',
                                              side_effect=lambda *args: args[4 if folder == 'nds' else 3]), \
                                 patch.object(driver, 'register_delta_tables',
-                                             side_effect=lambda *args: args[2]), \
+                                             side_effect=lambda *args: (args[2], Mock())), \
                                 patch.object(driver, 'analyze_catalog',
                                              side_effect=AssertionError('Analysis was disabled')), \
                                 patch.object(driver, 'Profiler', return_value=lambda **args: contextlib.nullcontext()), \
