@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -282,8 +282,8 @@ if __name__ == "__main__":
                         help="the number of replication factor when generating data to HDFS. " +
                         "if not set, the Hadoop job will use the setting in the Hadoop cluster.")
     parser.add_argument("--update",
-                        help="generate update dataset <n>. <n> is identical to the number of " +
-                        "streams used in the Throughput Tests of the benchmark")
+                        help="generate refresh dataset <n>, where <n> is the refresh set number " +
+                        "from 1 to Sq, and Sq is the number of streams in each Throughput Test.")
 
 
     args = parser.parse_args()
